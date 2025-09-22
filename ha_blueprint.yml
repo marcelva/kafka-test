@@ -1,0 +1,52 @@
+blueprint:
+  name: Warnung - Nuki verriegelt aber Tür offen
+  description: >-
+    Sendet eine Warnung, wenn das Nuki-Schloss verriegelt wurde, aber der Türkontakt meldet, dass die Tür noch offen ist.
+  domain: automation
+  input:
+    nuki_lock:
+      name: Nuki Smart Lock
+      description: Das Schloss-Entity, z. B. lock.nuki_haustuer
+      selector:
+        entity:
+          domain: lock
+    door_sensor:
+      name: Türkontakt (binary_sensor)
+      description: Der Tür-/Fensterkontakt, der „offen/geschlossen“ meldet
+      selector:
+        entity:
+          domain: binary_sensor
+    notify_service:
+      name: Benachrichtigungsdienst
+      description: Ein Service wie z. B. notify.mobile_app_xyz
+      selector:
+        action:
+          domain: notify
+    media_player:
+      name: Media Player (optional)
+      description: Gerät, das Ansage ausgeben kann (z. B. Tablet)
+      default: none
+      selector:
+        entity:
+          domain: media_player
+trigger:
+  - platform: state
+    entity_id: !input nuki_lock
+    to: "locked"
+condition:
+  - condition: state
+    entity_id: !input door_sensor
+    state: "on"
+action:
+  - service: !input notify_service
+    data:
+      message: "⚠️ Das Schloss wurde verriegelt, aber die Tür ist noch offen!"
+  - choose:
+      - conditions: "{{ media_player is not none }}"
+        sequence:
+          - service: tts.google_say
+            target:
+              entity_id: !input media_player
+            data:
+              message: "Bitte überprüfe die Haustür, sie ist noch offen!"
+mode: single
