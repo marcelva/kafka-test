@@ -16,16 +16,17 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
-    notify_service:
-      name: Benachrichtigungsdienst
-      description: Ein Service wie z. B. notify.mobile_app_xyz
+    notify_target:
+      name: Benachrichtigung
+      description: Service oder Gerät für die Push-Nachricht (z. B. notify.mobile_app_xyz)
       selector:
-        action:
+        entity:
           domain: notify
+          multiple: false
     media_player:
       name: Media Player (optional)
-      description: Gerät, das Ansage ausgeben kann (z. B. Tablet)
-      default: none
+      description: Gerät, das Ansagen oder Sounds abspielen kann
+      default: []
       selector:
         entity:
           domain: media_player
@@ -38,11 +39,11 @@ condition:
     entity_id: !input door_sensor
     state: "on"
 action:
-  - service: !input notify_service
+  - service: notify.notify
     data:
       message: "⚠️ Das Schloss wurde verriegelt, aber die Tür ist noch offen!"
   - choose:
-      - conditions: "{{ media_player is not none }}"
+      - conditions: "{{ media_player | length > 0 }}"
         sequence:
           - service: tts.google_say
             target:
