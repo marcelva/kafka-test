@@ -1,28 +1,27 @@
 blueprint:
-  name: Türkontakt Blink-Bestätigung
+  name: Smart Lock Blink-Bestätigung
   description: >
-    Wenn der Tür-/Fensterkontakt geöffnet wird, blinkt die gewählte Lampe zweimal
-    in der "Offen"-Farbe. Wenn der Kontakt geschlossen wird, blinkt die Lampe zweimal
-    in der "Geschlossen"-Farbe.
+    Wenn das Smart Lock entriegelt (unlocked) oder verriegelt (locked) wird,
+    blinkt die gewählte Lampe zweimal in der entsprechenden Farbe.
   domain: automation
   input:
-    door_sensor:
-      name: Tür-/Fensterkontakt
+    smart_lock:
+      name: Smart Lock
       selector:
         entity:
-          domain: binary_sensor
+          domain: lock
     light_target:
       name: Lampe
       selector:
         entity:
           domain: light
-    open_color:
-      name: Farbe bei Öffnen
+    unlock_color:
+      name: Farbe bei Entriegeln (unlocked)
       default: [0,255,0] # Grün
       selector:
         color_rgb: {}
-    close_color:
-      name: Farbe bei Schließen
+    lock_color:
+      name: Farbe bei Verriegeln (locked)
       default: [255,0,0] # Rot
       selector:
         color_rgb: {}
@@ -45,19 +44,23 @@ blueprint:
 
 trigger:
   - platform: state
-    entity_id: !input door_sensor
+    entity_id: !input smart_lock
+    to: "locked"
+  - platform: state
+    entity_id: !input smart_lock
+    to: "unlocked"
 
 action:
   - variables:
       light_entity: !input light_target
-      open_color: !input open_color
-      close_color: !input close_color
+      unlock_color: !input unlock_color
+      lock_color: !input lock_color
       blink_brightness: !input blink_brightness
       blink_duration: !input blink_duration
       trigger_to: "{{ trigger.to_state.state }}"
 
   - choose:
-      - conditions: "{{ trigger_to == 'on' }}"
+      - conditions: "{{ trigger_to == 'unlocked' }}"
         sequence:
           - repeat:
               count: 2
@@ -66,7 +69,7 @@ action:
                   target:
                     entity_id: !input light_target
                   data:
-                    rgb_color: !input open_color
+                    rgb_color: !input unlock_color
                     brightness: "{{ blink_brightness }}"
                 - delay:
                     seconds: "{{ blink_duration }}"
@@ -75,7 +78,7 @@ action:
                     entity_id: !input light_target
                 - delay:
                     seconds: "{{ blink_duration }}"
-      - conditions: "{{ trigger_to == 'off' }}"
+      - conditions: "{{ trigger_to == 'locked' }}"
         sequence:
           - repeat:
               count: 2
@@ -84,7 +87,7 @@ action:
                   target:
                     entity_id: !input light_target
                   data:
-                    rgb_color: !input close_color
+                    rgb_color: !input lock_color
                     brightness: "{{ blink_brightness }}"
                 - delay:
                     seconds: "{{ blink_duration }}"
