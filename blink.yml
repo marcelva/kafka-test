@@ -1,0 +1,97 @@
+blueprint:
+  name: Türkontakt Blink-Bestätigung
+  description: >
+    Wenn der Tür-/Fensterkontakt geöffnet wird, blinkt die gewählte Lampe zweimal
+    in der "Offen"-Farbe. Wenn der Kontakt geschlossen wird, blinkt die Lampe zweimal
+    in der "Geschlossen"-Farbe.
+  domain: automation
+  input:
+    door_sensor:
+      name: Tür-/Fensterkontakt
+      selector:
+        entity:
+          domain: binary_sensor
+    light_target:
+      name: Lampe
+      selector:
+        entity:
+          domain: light
+    open_color:
+      name: Farbe bei Öffnen
+      default: [0,255,0] # Grün
+      selector:
+        color_rgb: {}
+    close_color:
+      name: Farbe bei Schließen
+      default: [255,0,0] # Rot
+      selector:
+        color_rgb: {}
+    blink_brightness:
+      name: Blink-Helligkeit
+      default: 255
+      selector:
+        number:
+          min: 50
+          max: 255
+          step: 5
+    blink_duration:
+      name: Dauer pro Blink (Sekunden)
+      default: 0.5
+      selector:
+        number:
+          min: 0.1
+          max: 5
+          step: 0.1
+
+trigger:
+  - platform: state
+    entity_id: !input door_sensor
+
+action:
+  - variables:
+      light_entity: !input light_target
+      open_color: !input open_color
+      close_color: !input close_color
+      blink_brightness: !input blink_brightness
+      blink_duration: !input blink_duration
+      trigger_to: "{{ trigger.to_state.state }}"
+
+  - choose:
+      - conditions: "{{ trigger_to == 'on' }}"
+        sequence:
+          - repeat:
+              count: 2
+              sequence:
+                - service: light.turn_on
+                  target:
+                    entity_id: !input light_target
+                  data:
+                    rgb_color: !input open_color
+                    brightness: "{{ blink_brightness }}"
+                - delay:
+                    seconds: "{{ blink_duration }}"
+                - service: light.turn_off
+                  target:
+                    entity_id: !input light_target
+                - delay:
+                    seconds: "{{ blink_duration }}"
+      - conditions: "{{ trigger_to == 'off' }}"
+        sequence:
+          - repeat:
+              count: 2
+              sequence:
+                - service: light.turn_on
+                  target:
+                    entity_id: !input light_target
+                  data:
+                    rgb_color: !input close_color
+                    brightness: "{{ blink_brightness }}"
+                - delay:
+                    seconds: "{{ blink_duration }}"
+                - service: light.turn_off
+                  target:
+                    entity_id: !input light_target
+                - delay:
+                    seconds: "{{ blink_duration }}"
+
+mode: restart
