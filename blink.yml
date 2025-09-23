@@ -57,7 +57,7 @@ action:
       trigger_to: "{{ trigger.to_state.state }}"
 
   - choose:
-      - conditions: "{{ trigger_to == 'on' }}"
+      - conditions: "{{ trigger_to == 'unlocked' }}"
         sequence:
           - repeat:
               count: 2
@@ -75,7 +75,7 @@ action:
                     entity_id: !input light_target
                 - delay:
                     seconds: "{{ blink_duration }}"
-      - conditions: "{{ trigger_to == 'off' }}"
+      - conditions: "{{ trigger_to == 'locked' }}"
         sequence:
           - repeat:
               count: 2
