@@ -1,53 +1,136 @@
 blueprint:
-  name: Warnung - Nuki verriegelt aber Tür offen
-  description: >-
-    Sendet eine Warnung, wenn das Nuki-Schloss verriegelt wurde, aber der Türkontakt meldet, dass die Tür noch offen ist.
+  name: Lampe pulsiert orange bei offener Tür (restore state)
+  description: >
+    Wenn der gewählte Tür-/Fensterkontakt offen ist, lässt diese Automation die
+    gewählte Lampe in orange pulsen. Beim Schließen der Tür wird der ursprüngliche
+    Zustand der Lampe wiederhergestellt (an/aus, Helligkeit, Farbmodus wenn möglich).
   domain: automation
   input:
-    nuki_lock:
-      name: Nuki Smart Lock
-      description: Das Schloss-Entity, z. B. lock.nuki_haustuer
-      selector:
-        entity:
-          domain: lock
     door_sensor:
-      name: Türkontakt (binary_sensor)
-      description: Der Tür-/Fensterkontakt, der „offen/geschlossen“ meldet
+      name: Tür-/Fensterkontakt
+      description: Der Binary Sensor, der "offen" meldet (z. B. binary_sensor.tuerkontakt)
       selector:
         entity:
           domain: binary_sensor
-    notify_target:
-      name: Benachrichtigung
-      description: Service oder Gerät für die Push-Nachricht (z. B. notify.mobile_app_xyz)
+    light_target:
+      name: Lampe
+      description: Die Lampe, die pulsen soll (z. B. light.hue_flurlampe)
       selector:
         entity:
-          domain: notify
-          multiple: false
-    media_player:
-      name: Media Player (optional)
-      description: Gerät, das Ansagen oder Sounds abspielen kann
-      default: []
+          domain: light
+    pulse_high:
+      name: Helligkeit (heller Puls)
+      description: Helligkeitswert für den hellen Puls (1-255)
+      default: 255
       selector:
-        entity:
-          domain: media_player
+        number:
+          min: 1
+          max: 255
+          step: 1
+    pulse_low:
+      name: Helligkeit (dunkler Puls)
+      description: Helligkeitswert für den dunkleren Puls (1-255)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 255
+          step: 1
+    step_duration:
+      name: Dauer jeder Puls-Phase (Sekunden)
+      description: Dauer der hellen / dunkleren Phase in Sekunden (Ganzzahl)
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+
 trigger:
   - platform: state
-    entity_id: !input nuki_lock
-    to: "locked"
-condition:
-  - condition: state
     entity_id: !input door_sensor
-    state: "on"
+    to: "on"
+
+# Hauptlogik
 action:
-  - service: notify.notify
-    data:
-      message: "⚠️ Das Schloss wurde verriegelt, aber die Tür ist noch offen!"
+  - variables:
+      # Inputs / Entities
+      light_entity: !input light_target
+      pulse_high: !input pulse_high
+      pulse_low: !input pulse_low
+      step_duration: !input step_duration
+
+      # Ursprungszustand der Lampe speichern (wird zur Wiederherstellung genutzt)
+      original_state: "{{ states[light_entity].state }}"
+      original_brightness: "{{ state_attr(light_entity, 'brightness') }}"
+      original_color_mode: "{{ state_attr(light_entity, 'color_mode') }}"
+      original_color_temp: "{{ state_attr(light_entity, 'color_temp') }}"
+      original_hs_color: "{{ state_attr(light_entity, 'hs_color') }}"
+      original_rgb_color: "{{ state_attr(light_entity, 'rgb_color') }}"
+      original_xy_color: "{{ state_attr(light_entity, 'xy_color') }}"
+      original_effect: "{{ state_attr(light_entity, 'effect') }}"
+
+  # Puls-Schleife: läuft so lange, wie der Türsensor "on" meldet
+  - repeat:
+      while:
+        - condition: state
+          entity_id: !input door_sensor
+          state: "on"
+      sequence:
+        # Heller Puls (orange)
+        - service: light.turn_on
+          target:
+            entity_id: !input light_target
+          data:
+            rgb_color: [255,165,0]
+            brightness: "{{ pulse_high }}"
+        - delay: "00:00:{{ step_duration }}"
+
+        # Dunkler Puls (orange)
+        - service: light.turn_on
+          target:
+            entity_id: !input light_target
+          data:
+            rgb_color: [255,165,0]
+            brightness: "{{ pulse_low }}"
+        - delay: "00:00:{{ step_duration }}"
+
+  # Tür geschlossen → Zustand wiederherstellen
   - choose:
-      - conditions: "{{ media_player | length > 0 }}"
+      - conditions: "{{ original_state == 'on' and original_color_mode == 'color_temp' }}"
         sequence:
-          - service: tts.google_say
+          - service: light.turn_on
             target:
-              entity_id: !input media_player
+              entity_id: !input light_target
             data:
-              message: "Bitte überprüfe die Haustür, sie ist noch offen!"
-mode: single
+              brightness: "{{ original_brightness if original_brightness is not none else 255 }}"
+              color_temp: "{{ original_color_temp }}"
+      - conditions: "{{ original_state == 'on' and original_hs_color is not none }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness: "{{ original_brightness if original_brightness is not none else 255 }}"
+              hs_color: "{{ original_hs_color }}"
+      - conditions: "{{ original_state == 'on' and original_rgb_color is not none }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness: "{{ original_brightness if original_brightness is not none else 255 }}"
+              rgb_color: "{{ original_rgb_color }}"
+      - conditions: "{{ original_state == 'on' }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness: "{{ original_brightness if original_brightness is not none else 255 }}"
+      - default:
+          - service: light.turn_off
+            target:
+              entity_id: !input light_target
+
+mode: restart
