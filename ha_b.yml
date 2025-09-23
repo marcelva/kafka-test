@@ -1,0 +1,151 @@
+blueprint:
+  name: Lampe pulsiert bei offener Tür (mit Verzögerung & Farbwahl)
+  description: >
+    Wenn der gewählte Tür-/Fensterkontakt offen ist, lässt diese Automation die
+    gewählte Lampe nach einer Verzögerung pulsen. Farbe, Helligkeit und Verzögerung
+    sind einstellbar. Beim Schließen der Tür wird der ursprüngliche Zustand
+    wiederhergestellt.
+  domain: automation
+  input:
+    door_sensor:
+      name: Tür-/Fensterkontakt
+      selector:
+        entity:
+          domain: binary_sensor
+    light_target:
+      name: Lampe
+      selector:
+        entity:
+          domain: light
+    pulse_color:
+      name: Puls-Farbe
+      description: Farbe, in der die Lampe pulsiert
+      default: [255,165,0] # orange
+      selector:
+        color_rgb: {}
+    pulse_high:
+      name: Helligkeit (heller Puls)
+      default: 255
+      selector:
+        number:
+          min: 1
+          max: 255
+          step: 1
+    pulse_low:
+      name: Helligkeit (dunkler Puls)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 255
+          step: 1
+    step_duration:
+      name: Dauer jeder Puls-Phase (Sekunden)
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+    start_delay:
+      name: Start-Verzögerung (Sekunden)
+      description: Wie lange muss die Tür offen sein, bevor der Puls startet?
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 600
+          step: 1
+
+trigger:
+  - platform: state
+    entity_id: !input door_sensor
+    to: "on"
+
+action:
+  - variables:
+      light_entity: !input light_target
+      pulse_high: !input pulse_high
+      pulse_low: !input pulse_low
+      step_duration: !input step_duration
+      start_delay: !input start_delay
+      pulse_color: !input pulse_color
+
+      original_state: "{{ states[light_entity].state }}"
+      original_brightness: "{{ state_attr(light_entity, 'brightness') }}"
+      original_color_mode: "{{ state_attr(light_entity, 'color_mode') }}"
+      original_color_temp: "{{ state_attr(light_entity, 'color_temp') }}"
+      original_hs_color: "{{ state_attr(light_entity, 'hs_color') }}"
+      original_rgb_color: "{{ state_attr(light_entity, 'rgb_color') }}"
+      original_xy_color: "{{ state_attr(light_entity, 'xy_color') }}"
+
+  # Warten, bevor der Effekt startet
+  - delay:
+      seconds: "{{ start_delay }}"
+
+  # Effekt nur starten, wenn die Tür noch offen ist
+  - condition: state
+    entity_id: !input door_sensor
+    state: "on"
+
+  - repeat:
+      while:
+        - condition: state
+          entity_id: !input door_sensor
+          state: "on"
+      sequence:
+        - service: light.turn_on
+          target:
+            entity_id: !input light_target
+          data:
+            rgb_color: !input pulse_color
+            brightness: "{{ pulse_high }}"
+        - delay:
+            seconds: !input step_duration
+        - service: light.turn_on
+          target:
+            entity_id: !input light_target
+          data:
+            rgb_color: !input pulse_color
+            brightness: "{{ pulse_low }}"
+        - delay:
+            seconds: !input step_duration
+
+  - choose:
+      - conditions: "{{ original_state == 'on' and original_color_mode == 'color_temp' }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness: "{{ original_brightness | default(255) }}"
+              color_temp: "{{ original_color_temp }}"
+      - conditions: "{{ original_state == 'on' and original_hs_color is not none }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness: "{{ original_brightness | default(255) }}"
+              hs_color: "{{ original_hs_color }}"
+      - conditions: "{{ original_state == 'on' and original_rgb_color is not none }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness: "{{ original_brightness | default(255) }}"
+              rgb_color: "{{ original_rgb_color }}"
+      - conditions: "{{ original_state == 'on' }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness: "{{ original_brightness | default(255) }}"
+    default:
+      - service: light.turn_off
+        target:
+          entity_id: !input light_target
+
+mode: restart
