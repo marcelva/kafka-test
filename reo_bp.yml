@@ -1,0 +1,78 @@
+blueprint:
+  name: Reolink Kamera – Privatsphäre Modus
+  description: >
+    Setzt eine Reolink TrackMix Kamera in den Privatsphäre-Modus (zeigt nach unten, deaktiviert Erkennung) und stellt sie wieder her.
+  domain: automation
+  input:
+    camera:
+      name: Kamera
+      selector:
+        entity:
+          domain: camera
+    motion_switch:
+      name: Bewegungserkennung Schalter
+      selector:
+        entity:
+          domain: switch
+    tracking_switch:
+      name: Auto-Tracking Schalter
+      selector:
+        entity:
+          domain: switch
+    preset_privacy:
+      name: PTZ-Preset für Privatsphäre (z. B. "nach unten")
+      description: >
+        Name oder Nummer des Presets, das die Kamera nach unten zeigt.
+      selector:
+        text:
+    preset_normal:
+      name: PTZ-Preset für Normalbetrieb
+      description: >
+        Name oder Nummer des Presets für die Standardposition.
+      selector:
+        text:
+
+mode: single
+
+triggers:
+  - platform: state
+    entity_id: input_boolean.reolink_privacy_mode
+    to: "on"
+    id: "enable_privacy"
+  - platform: state
+    entity_id: input_boolean.reolink_privacy_mode
+    to: "off"
+    id: "disable_privacy"
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "enable_privacy"
+        sequence:
+          - service: switch.turn_off
+            target:
+              entity_id: !input motion_switch
+          - service: switch.turn_off
+            target:
+              entity_id: !input tracking_switch
+          - service: reolink.ptz_preset
+            data:
+              entity_id: !input camera
+              preset: !input preset_privacy
+
+      - conditions:
+          - condition: trigger
+            id: "disable_privacy"
+        sequence:
+          - service: reolink.ptz_preset
+            data:
+              entity_id: !input camera
+              preset: !input preset_normal
+          - delay: "00:00:05"
+          - service: switch.turn_on
+            target:
+              entity_id: !input motion_switch
+          - service: switch.turn_on
+            target:
+              entity_id: !input tracking_switch
