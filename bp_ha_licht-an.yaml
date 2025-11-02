@@ -1,0 +1,111 @@
+blueprint:
+  name: Licht bei Heimkehr im Dunkeln (Schuppenbereich)
+  description: >
+    Schaltet ein Licht im Schuppenbereich ein, wenn eine definierte Person heimkehrt
+    und es draußen dunkel ist. Wenn die Tür über Nuki geöffnet wird, wird das Licht
+    nach 1 Minute ausgeschaltet, andernfalls nach 10 Minuten.
+  domain: automation
+  input:
+    person:
+      name: Person
+      description: Die Person, deren Heimkehr das Licht steuern soll.
+      selector:
+        entity:
+          domain: person
+    illuminance_sensor:
+      name: Außen-Lichtsensor (Lux)
+      description: Sensor zur Messung der Außenhelligkeit.
+      selector:
+        entity:
+          domain: sensor
+    illuminance_below:
+      name: Schwellenwert Dunkelheit (Lux)
+      description: Das Licht geht nur an, wenn der Sensorwert unter diesem liegt.
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 1000
+          unit_of_measurement: lx
+    light_target:
+      name: Ziellicht im Schuppenbereich
+      description: Licht/Leuchte, die eingeschaltet werden soll.
+      selector:
+        target:
+          entity:
+            domain: light
+    nuki_lock:
+      name: Nuki Tür-Schloss
+      description: Das Nuki Türschloss – wenn geöffnet, kürzere Ausschaltzeit.
+      selector:
+        entity:
+          domain: lock
+    timeout_when_locked:
+      name: Ausschaltzeit bei Türöffnung (Sekunden)
+      description: Zeit in Sekunden bis das Licht ausgeschaltet wird, wenn die Tür geöffnet wird.
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 3600
+          unit_of_measurement: s
+    timeout_no_lock:
+      name: Ausschaltzeit ohne Türöffnung (Sekunden)
+      description: Zeit in Sekunden bis das Licht ausgeschaltet wird, wenn die Tür NICHT geöffnet wird.
+      default: 600
+      selector:
+        number:
+          min: 60
+          max: 3600
+          unit_of_measurement: s
+    condition_time_start:
+      name: Nur nach Zeit (optional) – Start
+      description: Optional: Nur aktiv nach dieser Uhrzeit.
+      selector:
+        time: {}
+      default: "00:00:00"
+    condition_time_end:
+      name: Nur nach Zeit (optional) – Ende
+      description: Optional: Nur aktiv bis zu dieser Uhrzeit.
+      selector:
+        time: {}
+      default: "23:59:59"
+
+trigger:
+  - platform: state
+    entity_id: !input person
+    to: "home"
+
+condition:
+  - condition: numeric_state
+    entity_id: !input illuminance_sensor
+    below: !input illuminance_below
+  - condition: time
+    after: !input condition_time_start
+    before: !input condition_time_end
+
+action:
+  - service: light.turn_on
+    target: !input light_target
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input nuki_lock
+        to: "unlocked"
+    timeout: "{{ !input timeout_no_lock }}"
+
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: !input nuki_lock
+            state: "unlocked"
+        sequence:
+          - delay:
+              seconds: "{{ !input timeout_when_locked }}"
+    default:
+      - delay:
+          seconds: "{{ !input timeout_no_lock }}"
+
+  - service: light.turn_off
+    target: !input light_target
+
+mode: single
