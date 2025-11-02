@@ -8,19 +8,19 @@ blueprint:
   input:
     person:
       name: Person
-      description: Die Person, deren Heimkehr das Licht steuern soll.
+      description: "Die Person, deren Heimkehr das Licht steuern soll."
       selector:
         entity:
           domain: person
     illuminance_sensor:
       name: Außen-Lichtsensor (Lux)
-      description: Sensor zur Messung der Außenhelligkeit.
+      description: "Sensor zur Messung der Außenhelligkeit."
       selector:
         entity:
           domain: sensor
     illuminance_below:
       name: Schwellenwert Dunkelheit (Lux)
-      description: Das Licht geht nur an, wenn der Sensorwert unter diesem liegt.
+      description: "Das Licht geht nur an, wenn der Sensorwert unter diesem liegt."
       default: 50
       selector:
         number:
@@ -29,47 +29,47 @@ blueprint:
           unit_of_measurement: lx
     light_target:
       name: Ziellicht im Schuppenbereich
-      description: Licht/Leuchte, die eingeschaltet werden soll.
+      description: "Licht/Leuchte, die eingeschaltet werden soll."
       selector:
         target:
           entity:
             domain: light
     nuki_lock:
       name: Nuki Tür-Schloss
-      description: Das Nuki Türschloss – wenn geöffnet, kürzere Ausschaltzeit.
+      description: "Das Nuki Türschloss – wenn geöffnet, kürzere Ausschaltzeit."
       selector:
         entity:
           domain: lock
-    timeout_when_locked:
+    timeout_when_unlocked:
       name: Ausschaltzeit bei Türöffnung (Sekunden)
-      description: Zeit in Sekunden bis das Licht ausgeschaltet wird, wenn die Tür geöffnet wird.
+      description: "Zeit in Sekunden bis das Licht ausgeschaltet wird, wenn die Tür geöffnet wird."
       default: 60
       selector:
         number:
           min: 10
           max: 3600
           unit_of_measurement: s
-    timeout_no_lock:
+    timeout_no_unlock:
       name: Ausschaltzeit ohne Türöffnung (Sekunden)
-      description: Zeit in Sekunden bis das Licht ausgeschaltet wird, wenn die Tür NICHT geöffnet wird.
+      description: "Zeit in Sekunden bis das Licht ausgeschaltet wird, wenn die Tür NICHT geöffnet wird."
       default: 600
       selector:
         number:
           min: 60
           max: 3600
           unit_of_measurement: s
-    condition_time_start:
-      name: Nur nach Zeit (optional) – Start
-      description: Optional: Nur aktiv nach dieser Uhrzeit.
-      selector:
-        time: {}
+    time_start:
+      name: "Nur aktiv zwischen Zeit X"
+      description: "Optional: Automatisierung nur nach dieser Uhrzeit."
       default: "00:00:00"
-    condition_time_end:
-      name: Nur nach Zeit (optional) – Ende
-      description: Optional: Nur aktiv bis zu dieser Uhrzeit.
       selector:
         time: {}
+    time_end:
+      name: "Und Zeit Y"
+      description: "Optional: Automatisierung nur bis zu dieser Uhrzeit."
       default: "23:59:59"
+      selector:
+        time: {}
 
 trigger:
   - platform: state
@@ -81,17 +81,20 @@ condition:
     entity_id: !input illuminance_sensor
     below: !input illuminance_below
   - condition: time
-    after: !input condition_time_start
-    before: !input condition_time_end
+    after: !input time_start
+    before: !input time_end
 
 action:
   - service: light.turn_on
     target: !input light_target
+
   - wait_for_trigger:
       - platform: state
         entity_id: !input nuki_lock
         to: "unlocked"
-    timeout: "{{ !input timeout_no_lock }}"
+    timeout:
+      seconds: !input timeout_no_unlock
+    continue_on_timeout: true
 
   - choose:
       - conditions:
@@ -100,10 +103,10 @@ action:
             state: "unlocked"
         sequence:
           - delay:
-              seconds: "{{ !input timeout_when_locked }}"
+              seconds: !input timeout_when_unlocked
     default:
       - delay:
-          seconds: "{{ !input timeout_no_lock }}"
+          seconds: !input timeout_no_unlock
 
   - service: light.turn_off
     target: !input light_target
