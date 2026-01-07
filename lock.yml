@@ -1,0 +1,95 @@
+blueprint:
+  name: Nuki morgens beim ersten Abstecken entsperren
+  description: >
+    Entriegelt ein Nuki-Schloss morgens beim ersten Abstecken des Handys vom Ladegerät.
+    Funktioniert nur im definierten Zeitfenster, nur wenn die Person zuhause ist
+    und nur einmal pro Tag.
+  domain: automation
+  input:
+    charging_sensor:
+      name: Ladesensor des Handys
+      description: Sensor oder Binary Sensor, der den Ladevorgang anzeigt
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+
+    home_tracker:
+      name: Device Tracker (Zuhause)
+      description: Tracker der Person (muss "home" sein)
+      selector:
+        entity:
+          domain: device_tracker
+
+    nuki_lock:
+      name: Nuki Schloss
+      description: Das Nuki Lock, das entriegelt werden soll
+      selector:
+        entity:
+          domain: lock
+
+    daily_helper:
+      name: Tages-Helper (input_boolean)
+      description: Merkt sich, ob heute schon entsperrt wurde
+      selector:
+        entity:
+          domain: input_boolean
+
+    start_time:
+      name: Startzeit
+      default: "05:30:00"
+      selector:
+        time: {}
+
+    end_time:
+      name: Endzeit
+      default: "10:00:00"
+      selector:
+        time: {}
+
+trigger:
+  - platform: state
+    entity_id: !input charging_sensor
+
+condition:
+  # Ladezustand: von Laden zu Nicht-Laden
+  - condition: template
+    value_template: >
+      {% if trigger.from_state is none or trigger.to_state is none %}
+        false
+      {% else %}
+        {{ trigger.from_state.state in ['on','charging']
+           and trigger.to_state.state in ['off','discharging'] }}
+      {% endif %}
+
+  # Zeitfenster
+  - condition: time
+    after: !input start_time
+    before: !input end_time
+
+  # Nur zuhause
+  - condition: state
+    entity_id: !input home_tracker
+    state: "home"
+
+  # Nur einmal pro Tag
+  - condition: state
+    entity_id: !input daily_helper
+    state: "off"
+
+  # Nur wenn Schloss verriegelt ist
+  - condition: state
+    entity_id: !input nuki_lock
+    state: "locked"
+
+action:
+  - service: lock.unlock
+    target:
+      entity_id: !input nuki_lock
+
+  - service: input_boolean.turn_on
+    target:
+      entity_id: !input daily_helper
+
+mode: single
