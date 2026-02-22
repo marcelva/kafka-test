@@ -1,26 +1,30 @@
 blueprint:
-  name: Türöffnung Alarm mit Ein/Aus Schalter (iPhone)
-  description: Sendet eine Push-Nachricht aufs iPhone, wenn eine Tür geöffnet wird. Kann über einen Helper (input_boolean) aktiviert/deaktiviert werden.
+  name: Tür Alarm mit Kamera Snapshot (Critical iPhone)
+  description: Sendet eine Critical Push-Nachricht mit Kamera Snapshot, wenn eine Tür geöffnet wird. Aktivierbar per input_boolean.
   domain: automation
   input:
     door_sensor:
       name: Türsensor
-      description: Wähle den Türkontakt (binary_sensor)
       selector:
         entity:
           domain: binary_sensor
           device_class: door
 
+    camera_entity:
+      name: Kamera
+      description: Kamera für Snapshot
+      selector:
+        entity:
+          domain: camera
+
     notify_device:
       name: iPhone Gerät
-      description: Wähle dein iPhone aus der Companion App
       selector:
         device:
           integration: mobile_app
 
     enable_toggle:
       name: Alarm Ein/Aus Schalter
-      description: input_boolean zum Aktivieren oder Deaktivieren
       selector:
         entity:
           domain: input_boolean
@@ -36,11 +40,29 @@ condition:
     entity_id: !input enable_toggle
     state: "on"
 
+variables:
+  snapshot_file: "/config/www/tuer_snapshot.jpg"
+
 action:
+  - service: camera.snapshot
+    target:
+      entity_id: !input camera_entity
+    data:
+      filename: "{{ snapshot_file }}"
+
+  - delay: "00:00:01"
+
   - device_id: !input notify_device
     domain: mobile_app
     type: notify
-    message: "🚨 Achtung! Die Tür wurde geöffnet!"
-    title: "Tür Alarm"
+    title: "🚨 TÜR ALARM!"
+    message: "Die Tür wurde geöffnet!"
+    data:
+      image: "/local/tuer_snapshot.jpg"
+      push:
+        sound:
+          name: default
+          critical: 1
+          volume: 1.0
 
 mode: single
