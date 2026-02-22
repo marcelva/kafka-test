@@ -1,0 +1,46 @@
+blueprint:
+  name: Türöffnung Alarm mit Ein/Aus Schalter (iPhone)
+  description: Sendet eine Push-Nachricht aufs iPhone, wenn eine Tür geöffnet wird. Kann über einen Helper (input_boolean) aktiviert/deaktiviert werden.
+  domain: automation
+  input:
+    door_sensor:
+      name: Türsensor
+      description: Wähle den Türkontakt (binary_sensor)
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: door
+
+    notify_device:
+      name: iPhone Gerät
+      description: Wähle dein iPhone aus der Companion App
+      selector:
+        device:
+          integration: mobile_app
+
+    enable_toggle:
+      name: Alarm Ein/Aus Schalter
+      description: input_boolean zum Aktivieren oder Deaktivieren
+      selector:
+        entity:
+          domain: input_boolean
+
+trigger:
+  - platform: state
+    entity_id: !input door_sensor
+    from: "off"
+    to: "on"
+
+condition:
+  - condition: state
+    entity_id: !input enable_toggle
+    state: "on"
+
+action:
+  - device_id: !input notify_device
+    domain: mobile_app
+    type: notify
+    message: "🚨 Achtung! Die Tür wurde geöffnet!"
+    title: "Tür Alarm"
+
+mode: single
