@@ -1,10 +1,13 @@
 blueprint:
-  name: Tür Alarm mit Kamera Snapshot (Critical iPhone)
-  description: Sendet eine Critical Push-Nachricht mit Kamera Snapshot, wenn eine Tür geöffnet wird. Aktivierbar per input_boolean.
+  name: Tür Alarm mit Kamera Snapshot + Critical Push + Hue Rot
+  description: >
+    Sendet eine Critical Push-Nachricht mit Kamera Snapshot, wenn eine Tür geöffnet wird.
+    Optional können mehrere Hue-Lampen auf rot geschaltet werden. Aktivierbar per input_boolean.
   domain: automation
   input:
     door_sensor:
       name: Türsensor
+      description: Wähle den Türkontakt (binary_sensor)
       selector:
         entity:
           domain: binary_sensor
@@ -19,15 +22,27 @@ blueprint:
 
     notify_device:
       name: iPhone Gerät
+      description: Gerät aus der Home Assistant Companion App
       selector:
         device:
           integration: mobile_app
 
     enable_toggle:
       name: Alarm Ein/Aus Schalter
+      description: input_boolean zum Aktivieren oder Deaktivieren
       selector:
         entity:
           domain: input_boolean
+
+    hue_lights:
+      name: Hue Lampen (optional)
+      description: Lampen, die auf Rot gestellt werden sollen
+      default: []
+      selector:
+        target:
+          entity:
+            domain: light
+            integration: hue
 
 trigger:
   - platform: state
@@ -41,24 +56,40 @@ condition:
     state: "on"
 
 variables:
-  snapshot_file: "/config/www/tuer_snapshot.jpg"
+  timestamp: "{{ now().strftime('%Y%m%d_%H%M%S') }}"
+  snapshot_file: "/config/www/tuer_snapshot_{{ timestamp }}.jpg"
 
 action:
+  # 1️⃣ Kamera Snapshot erstellen
   - service: camera.snapshot
     target:
       entity_id: !input camera_entity
     data:
       filename: "{{ snapshot_file }}"
 
-  - delay: "00:00:01"
+  # 2️⃣ Kurze Verzögerung, damit Snapshot geschrieben wird
+  - delay: "00:00:03"
 
+  # 3️⃣ Hue Lampen optional auf Rot
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ !input hue_lights | length > 0 }}"
+        sequence:
+          - service: light.turn_on
+            target: !input hue_lights
+            data:
+              rgb_color: [255, 0, 0]
+              brightness: 255
+
+  # 4️⃣ Push Notification aufs iPhone (Critical)
   - device_id: !input notify_device
     domain: mobile_app
     type: notify
     title: "🚨 TÜR ALARM!"
     message: "Die Tür wurde geöffnet!"
     data:
-      image: "/local/tuer_snapshot.jpg"
+      image: "/local/tuer_snapshot_{{ timestamp }}.jpg"
       push:
         sound:
           name: default
