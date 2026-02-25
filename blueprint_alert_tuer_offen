@@ -74,10 +74,10 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ !input hue_lights | length > 0 }}"
+            value_template: "{{ inputs.hue_lights | length > 0 }}"
         sequence:
           - service: light.turn_on
-            target: !input hue_lights
+            target: "{{ inputs.hue_lights }}"
             data:
               rgb_color: [255, 0, 0]
               brightness: 255
