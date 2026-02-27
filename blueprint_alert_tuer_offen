@@ -2,12 +2,13 @@ blueprint:
   name: Tür Alarm mit Kamera Snapshot + Critical Push + Hue Rot
   description: >
     Sendet eine Critical Push-Nachricht mit Kamera Snapshot, wenn eine Tür geöffnet wird.
-    Optional können mehrere Hue-Lampen auf rot geschaltet werden. Aktivierbar per input_boolean.
+    Optional können mehrere Hue-Lampen auf rot geschaltet werden.
+    Aktivierbar per input_boolean.
   domain: automation
+
   input:
     door_sensor:
       name: Türsensor
-      description: Wähle den Türkontakt (binary_sensor)
       selector:
         entity:
           domain: binary_sensor
@@ -15,21 +16,18 @@ blueprint:
 
     camera_entity:
       name: Kamera
-      description: Kamera für Snapshot
       selector:
         entity:
           domain: camera
 
     notify_device:
       name: iPhone Gerät
-      description: Gerät aus der Home Assistant Companion App
       selector:
         device:
           integration: mobile_app
 
     enable_toggle:
       name: Alarm Ein/Aus Schalter
-      description: input_boolean zum Aktivieren oder Deaktivieren
       selector:
         entity:
           domain: input_boolean
@@ -37,7 +35,7 @@ blueprint:
     hue_lights:
       name: Hue Lampen (optional)
       description: Lampen, die auf Rot gestellt werden sollen
-      default: []
+      default: {}
       selector:
         target:
           entity:
@@ -58,31 +56,30 @@ condition:
 variables:
   timestamp: "{{ now().strftime('%Y%m%d_%H%M%S') }}"
   snapshot_file: "/config/www/tuer_snapshot_{{ timestamp }}.jpg"
+  hue_targets: !input hue_lights
 
 action:
-  # 1️⃣ Kamera Snapshot erstellen
+  # Snapshot erstellen
   - service: camera.snapshot
     target:
       entity_id: !input camera_entity
     data:
       filename: "{{ snapshot_file }}"
 
-  # 2️⃣ Kurze Verzögerung, damit Snapshot geschrieben wird
   - delay: "00:00:03"
 
-  # 3️⃣ Hue Lampen optional auf Rot
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: "{{ inputs.hue_lights | length > 0 }}"
-        sequence:
-          - service: light.turn_on
-            target: "{{ inputs.hue_lights }}"
-            data:
-              rgb_color: [255, 0, 0]
-              brightness: 255
+  # Hue Lampen optional schalten (ohne Template Condition!)
+  - if:
+      - condition: template
+        value_template: "{{ hue_targets is defined and hue_targets.entity_id is defined }}"
+    then:
+      - service: light.turn_on
+        target: !input hue_lights
+        data:
+          rgb_color: [255, 0, 0]
+          brightness: 255
 
-  # 4️⃣ Push Notification aufs iPhone (Critical)
+  # Critical Push
   - device_id: !input notify_device
     domain: mobile_app
     type: notify
