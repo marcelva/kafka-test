@@ -1,6 +1,6 @@
 blueprint:
-  name: Vibrationssensor Benachrichtigung
-  description: Sendet eine Push-Benachrichtigung bei Vibration mit konfigurierbarem Zeitfenster.
+  name: Vibrationssensor → Handy Benachrichtigung
+  description: Sendet eine Push-Benachrichtigung an mehrere mobile Geräte wenn ein Vibrationssensor auslöst. Unterstützt Zeitfenster.
   domain: automation
 
   input:
@@ -12,18 +12,21 @@ blueprint:
         entity:
           domain: binary_sensor
 
-    notify_service:
-      name: Notify Service
-      description: Notify Service oder Notify Gruppe
-      default: notify.familie_handys
+    notify_devices:
+      name: Geräte für Benachrichtigung
+      description: Mobile Geräte mit Home Assistant App
+      default: []
       selector:
-        text: {}
+        device:
+          integration: mobile_app
+          multiple: true
 
     message:
       name: Nachricht
+      description: Text der gesendet wird
       default: "Vibration erkannt!"
       selector:
-        text: {}
+        text:
 
     start_time:
       name: Startzeit
@@ -50,6 +53,12 @@ condition:
     before: !input end_time
 
 action:
-  - service: !input notify_service
-    data:
-      message: !input message
+
+  - repeat:
+      for_each: !input notify_devices
+      sequence:
+        - service: >
+            notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}
+          data:
+            message: !input message
+            title: "Home Assistant"
