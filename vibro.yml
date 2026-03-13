@@ -1,22 +1,29 @@
 blueprint:
   name: Vibrationssensor Benachrichtigung
-  description: Sendet eine Push-Benachrichtigung wenn ein Vibrationssensor auslöst, mit konfigurierbarem Zeitfenster.
+  description: Sendet eine Push-Benachrichtigung bei Vibration mit konfigurierbarem Zeitfenster.
   domain: automation
 
   input:
 
     vibration_sensor:
       name: Vibrationssensor
+      description: Sensor der bei Vibration auf ON geht
       selector:
         entity:
           domain: binary_sensor
 
-    notify_services:
-      name: Notify Services
-      description: Mobile App Notify Services (z.B. notify.mobile_app_iphone)
+    notify_service:
+      name: Notify Service
+      description: Notify Service oder Notify Gruppe
+      default: notify.familie_handys
       selector:
-        text:
-          multiple: true
+        text: {}
+
+    message:
+      name: Nachricht
+      default: "Vibration erkannt!"
+      selector:
+        text: {}
 
     start_time:
       name: Startzeit
@@ -29,12 +36,6 @@ blueprint:
       default: "23:59:00"
       selector:
         time: {}
-
-    message:
-      name: Nachricht
-      default: "Vibration erkannt!"
-      selector:
-        text: {}
 
 mode: single
 
@@ -49,12 +50,6 @@ condition:
     before: !input end_time
 
 action:
-  - variables:
-      notify_list: !input notify_services
-
-  - repeat:
-      for_each: "{{ notify_list }}"
-      sequence:
-        - service: "{{ repeat.item }}"
-          data:
-            message: !input message
+  - service: !input notify_service
+    data:
+      message: !input message
