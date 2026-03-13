@@ -1,0 +1,62 @@
+blueprint:
+  name: Vibrationssensor Benachrichtigung
+  description: Sendet eine Benachrichtigung an mehrere Geräte wenn ein Vibrationssensor auslöst, optional mit Zeitfenster.
+  domain: automation
+  input:
+
+    vibration_sensor:
+      name: Vibrationssensor
+      description: Sensor der bei Vibration auf ON geht
+      selector:
+        entity:
+          domain: binary_sensor
+
+    notify_devices:
+      name: Benachrichtigungsgeräte
+      description: Geräte die eine Push-Benachrichtigung erhalten sollen
+      selector:
+        device:
+          integration: mobile_app
+          multiple: true
+
+    start_time:
+      name: Startzeit
+      description: Ab wann Benachrichtigungen erlaubt sind
+      default: "00:00:00"
+      selector:
+        time: {}
+
+    end_time:
+      name: Endzeit
+      description: Bis wann Benachrichtigungen erlaubt sind
+      default: "23:59:00"
+      selector:
+        time: {}
+
+    message:
+      name: Nachricht
+      description: Text der gesendet wird
+      default: "Vibration erkannt!"
+      selector:
+        text: {}
+
+mode: single
+
+trigger:
+  - platform: state
+    entity_id: !input vibration_sensor
+    to: "on"
+
+condition:
+  - condition: time
+    after: !input start_time
+    before: !input end_time
+
+action:
+  - repeat:
+      for_each: !input notify_devices
+      sequence:
+        - device_id: "{{ repeat.item }}"
+          domain: mobile_app
+          type: notify
+          message: !input message
