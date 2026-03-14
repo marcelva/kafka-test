@@ -1,10 +1,6 @@
 blueprint:
   name: Camera Snapshot Advanced (Multi Notify + Cooldown + iOS Critical)
-  description: >
-    Sendet einen Kamera Snapshot wenn ein Binary Sensor auslöst.
-    Unterstützt mehrere Notify Services, Cooldown gegen Spam
-    und optionale kritische iOS Alerts.
-
+  description: Kamera Snapshot mit Multi-Notify, Cooldown und optional kritischem iOS Alert
   domain: automation
 
   input:
@@ -23,10 +19,11 @@ blueprint:
 
     notify_services:
       name: Notify Services
-      description: Mehrere Services oder Gruppen möglich
+      description: >
+        Mehrere Notify Services möglich (z.B. notify.family,
+        notify.mobile_app_iphone_max, notify.telegram)
       selector:
-        entity:
-          domain: notify
+        text:
           multiple: true
 
     message:
@@ -42,8 +39,7 @@ blueprint:
         text:
 
     cooldown_minutes:
-      name: Cooldown (Minuten)
-      description: Mindestzeit zwischen Notifications
+      name: Cooldown Minuten
       default: 2
       selector:
         number:
@@ -54,22 +50,9 @@ blueprint:
 
     critical_ios:
       name: Kritischer iOS Alert
-      description: Überschreibt Stummmodus auf iPhones
       default: false
       selector:
         boolean:
-
-    start_time:
-      name: Startzeit
-      default: "00:00:00"
-      selector:
-        time:
-
-    end_time:
-      name: Endzeit
-      default: "23:59:59"
-      selector:
-        time:
 
 mode: single
 
@@ -79,19 +62,12 @@ trigger:
     from: "off"
     to: "on"
 
-condition:
-
-  - condition: time
-    after: !input start_time
-    before: !input end_time
-
 variables:
 
-  camera: !input camera_entity
-  cooldown: !input cooldown_minutes
   notify_list: !input notify_services
+  cooldown: !input cooldown_minutes
   critical: !input critical_ios
-  snapshot_file: "/config/www/snapshots/{{ camera | replace('camera.', '') }}_last.jpg"
+  snapshot_file: "/config/www/snapshot_last.jpg"
 
 action:
 
@@ -115,7 +91,7 @@ action:
             title: !input title
             message: !input message
             data:
-              image: "{{ snapshot_file | replace('/config/www','/local') }}"
+              image: "/local/snapshot_last.jpg"
               push:
                 interruption-level: >
                   {% if critical %}critical{% else %}active{% endif %}
