@@ -1,0 +1,126 @@
+blueprint:
+  name: Camera Snapshot Advanced (Multi Notify + Cooldown + iOS Critical)
+  description: >
+    Sendet einen Kamera Snapshot wenn ein Binary Sensor auslöst.
+    Unterstützt mehrere Notify Services, Cooldown gegen Spam
+    und optionale kritische iOS Alerts.
+
+  domain: automation
+
+  input:
+
+    trigger_sensor:
+      name: Trigger Sensor
+      selector:
+        entity:
+          domain: binary_sensor
+
+    camera_entity:
+      name: Kamera
+      selector:
+        entity:
+          domain: camera
+
+    notify_services:
+      name: Notify Services
+      description: Mehrere Services oder Gruppen möglich
+      selector:
+        entity:
+          domain: notify
+          multiple: true
+
+    message:
+      name: Nachricht
+      default: Bewegung erkannt
+      selector:
+        text:
+
+    title:
+      name: Titel
+      default: Home Assistant
+      selector:
+        text:
+
+    cooldown_minutes:
+      name: Cooldown (Minuten)
+      description: Mindestzeit zwischen Notifications
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: minutes
+          mode: box
+
+    critical_ios:
+      name: Kritischer iOS Alert
+      description: Überschreibt Stummmodus auf iPhones
+      default: false
+      selector:
+        boolean:
+
+    start_time:
+      name: Startzeit
+      default: "00:00:00"
+      selector:
+        time:
+
+    end_time:
+      name: Endzeit
+      default: "23:59:59"
+      selector:
+        time:
+
+mode: single
+
+trigger:
+  - platform: state
+    entity_id: !input trigger_sensor
+    from: "off"
+    to: "on"
+
+condition:
+
+  - condition: time
+    after: !input start_time
+    before: !input end_time
+
+variables:
+
+  camera: !input camera_entity
+  cooldown: !input cooldown_minutes
+  notify_list: !input notify_services
+  critical: !input critical_ios
+  snapshot_file: "/config/www/snapshots/{{ camera | replace('camera.', '') }}_last.jpg"
+
+action:
+
+  - condition: template
+    value_template: >
+      {% set last = state_attr(this.entity_id,'last_triggered') %}
+      {{ last is none or (as_timestamp(now()) - as_timestamp(last)) > (cooldown*60) }}
+
+  - service: camera.snapshot
+    target:
+      entity_id: !input camera_entity
+    data:
+      filename: "{{ snapshot_file }}"
+
+  - repeat:
+      for_each: "{{ notify_list }}"
+      sequence:
+
+        - service: "{{ repeat.item }}"
+          data:
+            title: !input title
+            message: !input message
+            data:
+              image: "{{ snapshot_file | replace('/config/www','/local') }}"
+              push:
+                interruption-level: >
+                  {% if critical %}critical{% else %}active{% endif %}
+                sound:
+                  name: default
+                  critical: >
+                    {% if critical %}1{% else %}0{% endif %}
+                  volume: 1.0
