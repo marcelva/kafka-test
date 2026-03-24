@@ -1,51 +1,79 @@
 blueprint:
-  name: Rauchmelder -> kritische iOS-Notification
+  name: 🚨 Rauchmelder Pro Alarm (robust + iOS Critical + Erweiterbar)
   description: >
-    Sendet bei Auslösung eines oder mehrerer Rauchmelder eine kritische
-    Benachrichtigung an ein iOS-Gerät oder an eine Notify-Gruppe.
+    Hochrobuster Rauchmelder-Blueprint mit:
+    - mehreren Sensoren
+    - iOS Critical Notifications
+    - Cooldown gegen Spam
+    - optional Licht & TTS
   domain: automation
+
   input:
     smoke_sensors:
       name: Rauchmelder
-      description: Wähle einen oder mehrere Rauchmelder aus.
       selector:
         entity:
+          domain: binary_sensor
+          device_class: smoke
           multiple: true
-          filter:
-            - domain: binary_sensor
-              device_class: smoke
 
     notify_service:
-      name: Notify-Ziel
-      description: >
-        Trage hier den Notify-Service ein, z. B. notify.mobile_app_dein_iphone
-        oder eine Notify-Gruppe wie notify.rauchalarm_gruppe.
+      name: Notify Service
+      description: z.B. notify.mobile_app_iphone oder notify.gruppe
       selector:
         text:
 
     title_template:
-      name: Titel der Nachricht
-      description: >
-        Template für den Titel. Verfügbare Variablen: trigger, now().
-      selector:
-        template:
-      default: "🚨 Rauchalarm: {{ state_attr(trigger.entity_id, 'friendly_name') or trigger.entity_id }}"
-
-    message_template:
-      name: Nachricht
-      description: >
-        Template für die Nachricht. Verfügbare Variablen: trigger, now().
+      name: Titel
       selector:
         template:
       default: >-
-        Rauchmelder "{{ state_attr(trigger.entity_id, 'friendly_name') or trigger.entity_id }}"
-        hat um {{ now().strftime('%d.%m.%Y %H:%M:%S') }} ausgelöst.
+        🚨 Rauchalarm: {{ name }}
+
+    message_template:
+      name: Nachricht
+      selector:
+        template:
+      default: >-
+        Rauch erkannt bei "{{ name }}" ({{ area }})
+        um {{ time }}.
+
+    cooldown:
+      name: Cooldown (Sekunden)
+      description: Verhindert mehrfaches Spammen
+      default: 120
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: Sekunden
+
+    lights:
+      name: Lichter (optional)
+      default: []
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+    tts_target:
+      name: TTS Ziel (optional)
+      default: ""
+      selector:
+        entity:
+          domain: media_player
+
+    tts_message:
+      name: TTS Nachricht
+      default: "Achtung! Rauch wurde erkannt!"
+      selector:
+        text:
 
 mode: parallel
 max: 10
 
-triggers:
-  - trigger: state
+trigger:
+  - platform: state
     entity_id: !input smoke_sensors
     to:
       - "on"
@@ -53,9 +81,42 @@ triggers:
       - "detected"
       - "alarm"
       - "triggered"
-      - "fire"
 
-actions:
+variables:
+  entity: >-
+    {% if trigger is defined %}
+      {% if trigger.entity_id is defined %}
+        {{ trigger.entity_id }}
+      {% elif trigger.to_state is defined and trigger.to_state.entity_id is defined %}
+        {{ trigger.to_state.entity_id }}
+      {% else %}
+        unknown
+      {% endif %}
+    {% else %}
+      unknown
+    {% endif %}
+
+  name: >-
+    {{ state_attr(entity, 'friendly_name') or entity }}
+
+  area: >-
+    {{ area_name(entity) or "Unbekannter Bereich" }}
+
+  time: >-
+    {{ now().strftime('%d.%m.%Y %H:%M:%S') }}
+
+condition:
+  - condition: template
+    value_template: >-
+      {% set last = state_attr(this.entity_id, 'last_triggered') %}
+      {% if last is none %}
+        true
+      {% else %}
+        (as_timestamp(now()) - as_timestamp(last)) > (inputs.cooldown | int)
+      {% endif %}
+
+action:
+  # 📲 iOS Critical Notification
   - action: !input notify_service
     data:
       title: !input title_template
@@ -66,3 +127,23 @@ actions:
             name: default
             critical: 1
             volume: 1.0
+
+  # 💡 Licht einschalten (optional)
+  - if:
+      - condition: template
+        value_template: "{{ inputs.lights | length > 0 }}"
+    then:
+      - action: light.turn_on
+        target:
+          entity_id: !input lights
+
+  # 🔊 TTS (optional)
+  - if:
+      - condition: template
+        value_template: "{{ inputs.tts_target != '' }}"
+    then:
+      - action: tts.google_translate_say
+        target:
+          entity_id: !input tts_target
+        data:
+          message: !input tts_message
