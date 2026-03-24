@@ -1,9 +1,9 @@
 blueprint:
-  name: Rauchmelder Pro Alarm 2026
+  name: Rauchmelder Pro mit iOS-Bestätigung
   description: >
-    Robuster Blueprint für Rauchmelder mit iOS Critical Notifications,
-    frei editierbarem Titel und Nachricht, variablen Platzhaltern und
-    optional auswählbaren Rollos, die bei Alarm automatisch hochfahren.
+    Robuster Rauchmelder-Blueprint mit iOS Critical Notifications,
+    frei editierbarem Titel und Nachricht, Bestätigung per Button,
+    sowie auswählbaren Rollos, die nur nach Bestätigung hochfahren.
   domain: automation
 
   input:
@@ -23,70 +23,83 @@ blueprint:
         Beispiel: notify.mobile_app_iphone_von_marcel oder notify.deine_gruppe
       selector:
         text:
-          type: text
       default: notify.mobile_app_iphone_von_marcel
 
     title_template:
       name: Titel der Nachricht
-      description: >
-        Verfügbare Variablen: name, area, time, entity_id
+      description: Verfügbare Variablen: name, area, time, entity_id
       selector:
         template:
       default: "🚨 Rauchalarm: {{ area }}"
 
     message_template:
       name: Nachricht
-      description: >
-        Verfügbare Variablen: name, area, time, entity_id
+      description: Verfügbare Variablen: name, area, time, entity_id
       selector:
         template:
       default: >-
         Rauchmelder "{{ name }}" in {{ area }} hat um {{ time }} ausgelöst.
+        Bitte in der Benachrichtigung bestätigen, wenn die Rollos hochfahren sollen.
 
     rollos:
       name: Rollos / Jalousien (optional)
-      description: Wähle die Rollos aus, die bei Rauchalarm automatisch hochfahren sollen.
+      description: Wähle die Rollos aus, die nach Bestätigung hochfahren sollen.
       selector:
         target:
           entity:
             domain: cover
       default: {}
 
-mode: single
+    confirmation_timeout:
+      name: Bestätigungs-Timeout
+      description: Wie lange auf die Bestätigung gewartet werden soll.
+      selector:
+        duration:
+      default:
+        minutes: 5
+
+mode: parallel
+max: 10
 max_exceeded: silent
 
 trigger:
   - platform: state
     entity_id: !input smoke_sensors
-    to: "on"
-
-variables:
-  notify_service: !input notify_service
-  rollos_target: !input rollos
-
-  entity_id: >-
-    {% set trig = trigger | default({}) %}
-    {% set ent = trig.entity_id if trig.entity_id is defined else none %}
-    {% if ent %}
-      {{ ent }}
-    {% else %}
-      {% set ts = trig.to_state if trig.to_state is defined else none %}
-      {{ ts.entity_id if ts is not none and ts.entity_id is defined else 'unknown' }}
-    {% endif %}
-
-  name: >-
-    {{ state_attr(entity_id, 'friendly_name') or entity_id }}
-
-  area: >-
-    {{ area_name(entity_id) or 'Unbekannter Bereich' }}
-
-  time: >-
-    {{ now().strftime('%d.%m.%Y %H:%M:%S') }}
-
-  has_rollos: >-
-    {{ rollos_target | default({}) | length > 0 }}
+    to:
+      - "on"
+      - "smoke"
+      - "detected"
+      - "alarm"
+      - "triggered"
+      - "fire"
 
 action:
+  - variables:
+      rollos_target: !input rollos
+
+      alarm_entity: >-
+        {% if trigger is defined and trigger.entity_id is defined %}
+          {{ trigger.entity_id }}
+        {% elif trigger is defined and trigger.to_state is defined and trigger.to_state.entity_id is defined %}
+          {{ trigger.to_state.entity_id }}
+        {% else %}
+          unknown
+        {% endif %}
+
+      name: >-
+        {{ state_attr(alarm_entity, 'friendly_name') or alarm_entity }}
+
+      area: >-
+        {{ area_name(alarm_entity) or 'Unbekannter Bereich' }}
+
+      time: >-
+        {{ now().strftime('%d.%m.%Y %H:%M:%S') }}
+
+      confirm_action: "{{ 'CONFIRM_ROLLOS_' ~ context.id }}"
+      ignore_action: "{{ 'IGNORE_ROLLOS_' ~ context.id }}"
+
+      has_rollos: "{{ rollos_target | default({}, true) | count > 0 }}"
+
   - action: !input notify_service
     data:
       title: !input title_template
@@ -97,11 +110,36 @@ action:
             name: default
             critical: 1
             volume: 1.0
+        actions:
+          - action: "{{ confirm_action }}"
+            title: "Rollos hochfahren"
+            authenticationRequired: true
+          - action: "{{ ignore_action }}"
+            title: "Ignorieren"
+            destructive: true
+
+  - wait_for_trigger:
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "{{ confirm_action }}"
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "{{ ignore_action }}"
+    timeout: !input confirmation_timeout
+    continue_on_timeout: true
 
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ has_rollos }}"
+            value_template: >-
+              {{ wait.trigger is not none and wait.trigger.event.data.action == confirm_action }}
         sequence:
-          - action: cover.open_cover
-            target: !input rollos
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ has_rollos }}"
+                sequence:
+                  - action: cover.open_cover
+                    target: !input rollos
