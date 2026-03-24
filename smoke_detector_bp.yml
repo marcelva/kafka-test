@@ -1,122 +1,92 @@
 blueprint:
-  name: 🚨 Rauchmelder Pro Alarm (robust + iOS Critical + Erweiterbar)
+  name: Rauchmelder Pro Alarm 2026
   description: >
-    Hochrobuster Rauchmelder-Blueprint mit:
-    - mehreren Sensoren
-    - iOS Critical Notifications
-    - Cooldown gegen Spam
-    - optional Licht & TTS
+    Robuster Blueprint für Rauchmelder mit iOS Critical Notifications,
+    frei editierbarem Titel und Nachricht, variablen Platzhaltern und
+    optional auswählbaren Rollos, die bei Alarm automatisch hochfahren.
   domain: automation
 
   input:
     smoke_sensors:
       name: Rauchmelder
+      description: Wähle einen oder mehrere Rauchmelder aus.
       selector:
         entity:
-          domain: binary_sensor
-          device_class: smoke
           multiple: true
+          filter:
+            - domain: binary_sensor
+              device_class: smoke
 
     notify_service:
-      name: Notify Service
-      description: z.B. notify.mobile_app_iphone oder notify.gruppe
+      name: Notify-Service
+      description: >
+        Beispiel: notify.mobile_app_iphone_von_marcel oder notify.deine_gruppe
       selector:
         text:
+          type: text
+      default: notify.mobile_app_iphone_von_marcel
 
     title_template:
-      name: Titel
+      name: Titel der Nachricht
+      description: >
+        Verfügbare Variablen: name, area, time, entity_id
       selector:
         template:
-      default: >-
-        🚨 Rauchalarm: {{ name }}
+      default: "🚨 Rauchalarm: {{ area }}"
 
     message_template:
       name: Nachricht
+      description: >
+        Verfügbare Variablen: name, area, time, entity_id
       selector:
         template:
       default: >-
-        Rauch erkannt bei "{{ name }}" ({{ area }})
-        um {{ time }}.
+        Rauchmelder "{{ name }}" in {{ area }} hat um {{ time }} ausgelöst.
 
-    cooldown:
-      name: Cooldown (Sekunden)
-      description: Verhindert mehrfaches Spammen
-      default: 120
+    rollos:
+      name: Rollos / Jalousien (optional)
+      description: Wähle die Rollos aus, die bei Rauchalarm automatisch hochfahren sollen.
       selector:
-        number:
-          min: 0
-          max: 3600
-          unit_of_measurement: Sekunden
+        target:
+          entity:
+            domain: cover
+      default: {}
 
-    lights:
-      name: Lichter (optional)
-      default: []
-      selector:
-        entity:
-          domain: light
-          multiple: true
-
-    tts_target:
-      name: TTS Ziel (optional)
-      default: ""
-      selector:
-        entity:
-          domain: media_player
-
-    tts_message:
-      name: TTS Nachricht
-      default: "Achtung! Rauch wurde erkannt!"
-      selector:
-        text:
-
-mode: parallel
-max: 10
+mode: single
+max_exceeded: silent
 
 trigger:
   - platform: state
     entity_id: !input smoke_sensors
-    to:
-      - "on"
-      - "smoke"
-      - "detected"
-      - "alarm"
-      - "triggered"
+    to: "on"
 
 variables:
-  entity: >-
-    {% if trigger is defined %}
-      {% if trigger.entity_id is defined %}
-        {{ trigger.entity_id }}
-      {% elif trigger.to_state is defined and trigger.to_state.entity_id is defined %}
-        {{ trigger.to_state.entity_id }}
-      {% else %}
-        unknown
-      {% endif %}
+  notify_service: !input notify_service
+  rollos_target: !input rollos
+
+  entity_id: >-
+    {% set trig = trigger | default({}) %}
+    {% set ent = trig.entity_id if trig.entity_id is defined else none %}
+    {% if ent %}
+      {{ ent }}
     {% else %}
-      unknown
+      {% set ts = trig.to_state if trig.to_state is defined else none %}
+      {{ ts.entity_id if ts is not none and ts.entity_id is defined else 'unknown' }}
     {% endif %}
 
   name: >-
-    {{ state_attr(entity, 'friendly_name') or entity }}
+    {{ state_attr(entity_id, 'friendly_name') or entity_id }}
 
   area: >-
-    {{ area_name(entity) or "Unbekannter Bereich" }}
+    {{ area_name(entity_id) or 'Unbekannter Bereich' }}
 
   time: >-
     {{ now().strftime('%d.%m.%Y %H:%M:%S') }}
 
-condition:
-  - condition: template
-    value_template: >-
-      {% set last = state_attr(this.entity_id, 'last_triggered') %}
-      {% if last is none %}
-        true
-      {% else %}
-        (as_timestamp(now()) - as_timestamp(last)) > (inputs.cooldown | int)
-      {% endif %}
+  has_rollos: >-
+    {{ rollos_target | default({}) | length > 0 }}
 
 action:
-  # 📲 iOS Critical Notification
   - action: !input notify_service
     data:
       title: !input title_template
@@ -128,22 +98,10 @@ action:
             critical: 1
             volume: 1.0
 
-  # 💡 Licht einschalten (optional)
-  - if:
-      - condition: template
-        value_template: "{{ inputs.lights | length > 0 }}"
-    then:
-      - action: light.turn_on
-        target:
-          entity_id: !input lights
-
-  # 🔊 TTS (optional)
-  - if:
-      - condition: template
-        value_template: "{{ inputs.tts_target != '' }}"
-    then:
-      - action: tts.google_translate_say
-        target:
-          entity_id: !input tts_target
-        data:
-          message: !input tts_message
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ has_rollos }}"
+        sequence:
+          - action: cover.open_cover
+            target: !input rollos
