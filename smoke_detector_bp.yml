@@ -1,15 +1,14 @@
 blueprint:
-  name: Rauchmelder Pro mit iOS-Bestätigung
+  name: "Rauchmelder Pro – iOS-Bestätigung für Rollos"
   description: >
-    Robuster Blueprint für mehrere Rauchmelder mit iOS Critical Notification,
-    frei editierbarem Titel und Nachricht, Bestätigung per Button und
-    auswählbaren Rollos, die nur nach Bestätigung hochfahren.
+    Robuste Automation mit mehreren Rauchmeldern, kritischer iOS-Benachrichtigung,
+    Bestätigungsbuttons und auswählbaren Rollos, die nur nach Bestätigung hochfahren.
   domain: automation
 
   input:
     smoke_sensors:
-      name: Rauchmelder
-      description: Wähle einen oder mehrere Rauchmelder aus.
+      name: "Rauchmelder"
+      description: "Wähle einen oder mehrere Rauchmelder aus."
       selector:
         entity:
           multiple: true
@@ -18,44 +17,43 @@ blueprint:
               device_class: smoke
 
     notify_service:
-      name: Notify-Service
-      description: "Zum Beispiel: notify.mobile_app_iphone_von_marcel oder notify.deine_gruppe"
+      name: "Notify-Service"
+      description: "Zum Beispiel: notify.mobile_app_iphone_von_marcel oder eine Notify-Gruppe."
       selector:
         text:
-          type: text
-      default: notify.mobile_app_iphone_von_marcel
+      default: "notify.mobile_app_iphone_von_marcel"
 
     rollos:
-      name: Rollos / Jalousien (optional)
-      description: Wähle die Rollos aus, die nach Bestätigung hochfahren sollen.
+      name: "Rollos / Jalousien (optional)"
+      description: "Wähle die Rollos aus, die nach Bestätigung hochfahren sollen."
       selector:
-        entity:
-          multiple: true
-          filter:
-            - domain: cover
-      default: []
+        target:
+          entity:
+            domain: cover
+      default: {}
 
     title_template:
-      name: Titel der Nachricht
-      description: "Jinja-Template. Verfügbare Variablen: name, area, time, entity_id"
+      name: "Titel"
+      description: "Jinja-Template. Verfügbare Variablen: name, area, time, entity_id."
       selector:
         text:
           multiline: true
-      default: "🚨 Rauchalarm: {{ area }}"
+      default: >-
+        🚨 Rauchalarm: {{ area }}
 
     message_template:
-      name: Nachricht
-      description: "Jinja-Template. Verfügbare Variablen: name, area, time, entity_id"
+      name: "Nachricht"
+      description: "Jinja-Template. Verfügbare Variablen: name, area, time, entity_id."
       selector:
         text:
           multiline: true
       default: >-
         Rauchmelder "{{ name }}" in {{ area }} hat um {{ time }} ausgelöst.
-        Bitte in der Nachricht bestätigen, damit die Rollos hochfahren.
+        Tippe auf „Rollos hochfahren“, wenn es ein echter Alarm ist.
 
     confirmation_timeout:
-      name: Bestätigungs-Timeout
-      description: Wie lange auf die Bestätigung gewartet wird.
+      name: "Bestätigungs-Timeout"
+      description: "Wie lange auf die Bestätigung gewartet wird."
       selector:
         duration:
       default:
@@ -72,16 +70,19 @@ trigger:
 
 variables:
   notify_service: !input notify_service
-  rollos_entities: !input rollos
+  rollos_target: !input rollos
 
   alarm_entity_id: >-
-    {% set trig = trigger | default({}, true) %}
-    {% if trig.to_state is defined and trig.to_state and trig.to_state.entity_id is defined %}
-      {{ trig.to_state.entity_id }}
-    {% elif trig.entity_id is defined %}
-      {{ trig.entity_id }}
+    {% set e = trigger.get('entity_id') %}
+    {% if e %}
+      {{ e }}
     {% else %}
-      unknown
+      {% set ts = trigger.get('to_state', {}) %}
+      {% if ts and ts.get('entity_id') %}
+        {{ ts.get('entity_id') }}
+      {% else %}
+        unknown
+      {% endif %}
     {% endif %}
 
   name: >-
@@ -93,33 +94,26 @@ variables:
   time: >-
     {{ now().strftime('%d.%m.%Y %H:%M:%S') }}
 
-  run_id: >-
-    {{ as_timestamp(now()) | int }}
+  action_confirm: >-
+    CONFIRM_ROLLOS_{{ context.id }}
 
-  confirm_action: >-
-    CONFIRM_ROLLOS_{{ run_id }}
-
-  ignore_action: >-
-    IGNORE_ROLLOS_{{ run_id }}
+  action_dismiss: >-
+    DISMISS_ROLLOS_{{ context.id }}
 
   notification_tag: >-
-    {{ 'rauchalarm_' ~ (alarm_entity_id | replace('.', '_')) }}
-
-  has_rollos: >-
-    {{ rollos_entities | default([]) | count > 0 }}
+    rauchalarm_{{ alarm_entity_id | replace('.', '_') }}_{{ context.id }}
 
 action:
-  - action: !input notify_service
+  - service: !input notify_service
     data:
       title: !input title_template
       message: !input message_template
       data:
         tag: "{{ notification_tag }}"
         actions:
-          - action: "{{ confirm_action }}"
+          - action: "{{ action_confirm }}"
             title: "Rollos hochfahren"
-            authenticationRequired: true
-          - action: "{{ ignore_action }}"
+          - action: "{{ action_dismiss }}"
             title: "Ignorieren"
             destructive: true
         push:
@@ -132,11 +126,11 @@ action:
       - platform: event
         event_type: mobile_app_notification_action
         event_data:
-          action: "{{ confirm_action }}"
+          action: "{{ action_confirm }}"
       - platform: event
         event_type: mobile_app_notification_action
         event_data:
-          action: "{{ ignore_action }}"
+          action: "{{ action_dismiss }}"
     timeout: !input confirmation_timeout
     continue_on_timeout: true
 
@@ -144,18 +138,15 @@ action:
       - conditions:
           - condition: template
             value_template: >-
-              {{ wait.trigger is not none and wait.trigger.event.data.action == confirm_action and has_rollos }}
+              {{ wait.trigger is not none
+                 and wait.trigger.event.data.action == action_confirm
+                 and (rollos_target.get('entity_id', []) | count > 0) }}
         sequence:
-          - action: cover.open_cover
-            target:
-              entity_id: !input rollos
+          - service: cover.open_cover
+            target: !input rollos
 
-  - if:
-      - condition: template
-        value_template: "{{ wait.trigger is not none }}"
-    then:
-      - action: !input notify_service
-        data:
-          message: clear_notification
-          data:
-            tag: "{{ notification_tag }}"
+  - service: !input notify_service
+    data:
+      message: clear_notification
+      data:
+        tag: "{{ notification_tag }}"
