@@ -1,0 +1,68 @@
+blueprint:
+  name: Rauchmelder -> kritische iOS-Notification
+  description: >
+    Sendet bei Auslösung eines oder mehrerer Rauchmelder eine kritische
+    Benachrichtigung an ein iOS-Gerät oder an eine Notify-Gruppe.
+  domain: automation
+  input:
+    smoke_sensors:
+      name: Rauchmelder
+      description: Wähle einen oder mehrere Rauchmelder aus.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: binary_sensor
+              device_class: smoke
+
+    notify_service:
+      name: Notify-Ziel
+      description: >
+        Trage hier den Notify-Service ein, z. B. notify.mobile_app_dein_iphone
+        oder eine Notify-Gruppe wie notify.rauchalarm_gruppe.
+      selector:
+        text:
+
+    title_template:
+      name: Titel der Nachricht
+      description: >
+        Template für den Titel. Verfügbare Variablen: trigger, now().
+      selector:
+        template:
+      default: "🚨 Rauchalarm: {{ state_attr(trigger.entity_id, 'friendly_name') or trigger.entity_id }}"
+
+    message_template:
+      name: Nachricht
+      description: >
+        Template für die Nachricht. Verfügbare Variablen: trigger, now().
+      selector:
+        template:
+      default: >-
+        Rauchmelder "{{ state_attr(trigger.entity_id, 'friendly_name') or trigger.entity_id }}"
+        hat um {{ now().strftime('%d.%m.%Y %H:%M:%S') }} ausgelöst.
+
+mode: parallel
+max: 10
+
+triggers:
+  - trigger: state
+    entity_id: !input smoke_sensors
+    to:
+      - "on"
+      - "smoke"
+      - "detected"
+      - "alarm"
+      - "triggered"
+      - "fire"
+
+actions:
+  - action: !input notify_service
+    data:
+      title: !input title_template
+      message: !input message_template
+      data:
+        push:
+          sound:
+            name: default
+            critical: 1
+            volume: 1.0
