@@ -1,18 +1,20 @@
 blueprint:
   name: Rollo mit iPhone-Bestätigung
-  description: Rollo fährt erst nach Bestätigung per iPhone. Unterstützt Zeit- oder Lade-Trigger.
+  description: Rollo fährt erst nach Bestätigung per iPhone. Unterstützt einen festen Zeittrigger oder einen iPhone-Ladezustands-Trigger mit optionalem Ladefenster.
   domain: automation
-  author: OpenAI
   input:
     notify_service:
       name: iPhone Notify-Service
+      description: Zum Beispiel notify.mobile_app_mein_iphone
       selector:
         text:
+
     cover_entity:
       name: Rollo / Cover
       selector:
         entity:
           domain: cover
+
     cover_action:
       name: Rollo-Aktion
       selector:
@@ -21,189 +23,280 @@ blueprint:
             - open
             - close
       default: open
+
     fixed_time_enabled:
       name: Fester Zeittrigger aktiv
       selector:
         boolean:
       default: true
+
     fixed_time:
       name: Feste Uhrzeit
       selector:
         time:
       default: "19:00:00"
+
     charge_trigger_enabled:
       name: Lade-Trigger aktiv
       selector:
         boolean:
       default: false
+
     charge_sensor:
       name: iPhone-Ladesensor
+      description: Nur nötig, wenn Lade- oder Kabel-Trigger aktiv ist. Leer lassen, wenn nicht verwendet.
+      default: ""
       selector:
         entity:
-          domain: sensor
+          filter:
+            - domain: sensor
+              integration: mobile_app
+
     charge_window_enabled:
       name: Ladefenster aktiv
       selector:
         boolean:
       default: false
+
     charge_window_start:
       name: Ladefenster Start
       selector:
         time:
       default: "21:00:00"
+
     charge_window_end:
       name: Ladefenster Ende
       selector:
         time:
       default: "23:00:00"
+
     unplug_trigger_enabled:
       name: Trigger bei Kabel entfernt
       selector:
         boolean:
       default: false
+
     confirmation_timeout:
       name: Timeout
       selector:
         duration:
       default:
         minutes: 2
+
     debug_logging:
       name: Debug Logging
       selector:
         boolean:
       default: true
 
+trigger_variables:
+  charge_sensor: !input charge_sensor
+  charge_trigger_enabled: !input charge_trigger_enabled
+  unplug_trigger_enabled: !input unplug_trigger_enabled
+
+triggers:
+  - trigger: time
+    id: fixed_time
+    at: !input fixed_time
+    enabled: !input fixed_time_enabled
+
+  - trigger: state
+    id: charge_plugged
+    entity_id: "{{ charge_sensor }}"
+    to:
+      - "Charging"
+      - "Full"
+    enabled: "{{ charge_trigger_enabled and charge_sensor | length > 0 }}"
+
+  - trigger: state
+    id: charge_unplugged
+    entity_id: "{{ charge_sensor }}"
+    to: "Not Charging"
+    enabled: "{{ unplug_trigger_enabled and charge_sensor | length > 0 }}"
+
 mode: parallel
 max: 10
+max_exceeded: silent
 
 variables:
   notify_service: !input notify_service
   cover_action: !input cover_action
+  confirmation_timeout: !input confirmation_timeout
   charge_window_enabled: !input charge_window_enabled
   charge_window_start: !input charge_window_start
   charge_window_end: !input charge_window_end
   debug_logging: !input debug_logging
+  timeout_seconds: >-
+    {% set d = confirmation_timeout.get('days', 0) | int %}
+    {% set h = confirmation_timeout.get('hours', 0) | int %}
+    {% set m = confirmation_timeout.get('minutes', 0) | int %}
+    {% set s = confirmation_timeout.get('seconds', 0) | int %}
+    {{ d * 86400 + h * 3600 + m * 60 + s }}
 
-trigger:
-  - platform: time
-    id: time
-    at: !input fixed_time
-    enabled: !input fixed_time_enabled
-
-  - platform: state
-    id: charging
-    entity_id: !input charge_sensor
-    to:
-      - "Charging"
-      - "Full"
-    enabled: !input charge_trigger_enabled
-
-  - platform: state
-    id: unplugged
-    entity_id: !input charge_sensor
-    to: "Not Charging"
-    enabled: !input unplug_trigger_enabled
-
-action:
+actions:
   - variables:
-      tag: "{{ 'rollo_' ~ context.id }}"
-      action_confirm: "{{ 'CONFIRM_' ~ context.id }}"
-      action_abort: "{{ 'ABORT_' ~ context.id }}"
+      trigger_label: >-
+        {% if trigger.id == 'fixed_time' %}
+          Fester Zeittrigger
+        {% elif trigger.id == 'charge_plugged' %}
+          iPhone lädt
+        {% else %}
+          iPhone vom Ladekabel genommen
+        {% endif %}
+      notification_tag: "{{ 'rollo_confirm_' ~ context.id }}"
+      confirm_action: "{{ 'ROLL_CONFIRM_' ~ context.id }}"
+      abort_action: "{{ 'ROLL_ABORT_' ~ context.id }}"
       window_ok: >-
-        {% if trigger.id != 'charging' or not charge_window_enabled %}
+        {% if trigger.id != 'charge_plugged' or not charge_window_enabled %}
           true
         {% else %}
           {% set start = today_at(charge_window_start) %}
           {% set end = today_at(charge_window_end) %}
-          {% if start <= end %}
-            {{ start <= now() <= end }}
-          {% else %}
-            {{ now() >= start or now() <= end }}
-          {% endif %}
+          {% set now_ts = now() %}
+          {{ (start <= end and start <= now_ts <= end) or (start > end and (now_ts >= start or now_ts <= end)) }}
         {% endif %}
 
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'charging' and charge_window_enabled and not (window_ok | bool) }}"
+            value_template: "{{ trigger.id == 'charge_plugged' and charge_window_enabled and not (window_ok | bool) }}"
         sequence:
-          - service: system_log.write
-            data:
-              message: "Trigger außerhalb Ladefenster – Abbruch"
-              level: info
-
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ debug_logging }}"
+                sequence:
+                  - action: system_log.write
+                    data:
+                      level: info
+                      logger: blueprint.rollo_mit_iphone_bestaetigung
+                      message: >-
+                        {{ trigger_label }} ausgelöst, aber das Ladefenster
+                        ({{ charge_window_start }} bis {{ charge_window_end }}) war nicht erfüllt.
+                        Keine Aktion ausgeführt.
     default:
-      - service: system_log.write
-        data:
-          message: "Trigger {{ trigger.id }} ausgelöst"
-          level: info
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ debug_logging }}"
+            sequence:
+              - action: system_log.write
+                data:
+                  level: info
+                  logger: blueprint.rollo_mit_iphone_bestaetigung
+                  message: >-
+                    {{ trigger_label }} ausgelöst.
+                    Ladefenster: {{ 'nicht relevant' if trigger.id != 'charge_plugged' or not charge_window_enabled else ('erfüllt' if (window_ok | bool) else 'nicht erfüllt') }}.
+                    Sende iPhone-Bestätigung.
 
-      - service: "{{ notify_service }}"
+      - action: !input notify_service
         data:
-          title: "Rollo bestätigen"
-          message: "Soll das Rollo fahren?"
+          title: Rollo bestätigen
+          message: >-
+            {{ trigger_label }} hat die Aktion ausgelöst.
+            Bitte innerhalb von {{ timeout_seconds }} Sekunden bestätigen.
           data:
-            tag: "{{ tag }}"
+            tag: "{{ notification_tag }}"
             actions:
-              - action: "{{ action_confirm }}"
-                title: "Ja"
-              - action: "{{ action_abort }}"
-                title: "Nein"
+              - action: "{{ confirm_action }}"
+                title: Bestätigen
+              - action: "{{ abort_action }}"
+                title: Abbrechen
 
       - wait_for_trigger:
-          - platform: event
+          - trigger: event
             event_type: mobile_app_notification_action
             event_data:
-              action: "{{ action_confirm }}"
-          - platform: event
+              action: "{{ confirm_action }}"
+          - trigger: event
             event_type: mobile_app_notification_action
             event_data:
-              action: "{{ action_abort }}"
+              action: "{{ abort_action }}"
         timeout: !input confirmation_timeout
 
       - choose:
           - conditions:
               - condition: template
-                value_template: "{{ wait.completed and wait.trigger.event.data.action == action_confirm }}"
+                value_template: "{{ wait.completed and wait.trigger.event.data.action == confirm_action }}"
             sequence:
-              - service: system_log.write
-                data:
-                  message: "Bestätigt – Rollo fährt"
-                  level: info
-
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ debug_logging }}"
+                    sequence:
+                      - action: system_log.write
+                        data:
+                          level: info
+                          logger: blueprint.rollo_mit_iphone_bestaetigung
+                          message: >-
+                            {{ trigger_label }} bestätigt. Fahre Rollo {{ cover_action }}.
               - choose:
                   - conditions:
                       - condition: template
                         value_template: "{{ cover_action == 'open' }}"
                     sequence:
-                      - service: cover.open_cover
+                      - action: cover.open_cover
                         target:
                           entity_id: !input cover_entity
                   - default:
-                      - service: cover.close_cover
+                      - action: cover.close_cover
                         target:
                           entity_id: !input cover_entity
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ debug_logging }}"
+                    sequence:
+                      - action: system_log.write
+                        data:
+                          level: info
+                          logger: blueprint.rollo_mit_iphone_bestaetigung
+                          message: "Rollo wurde gefahren."
+              - action: !input notify_service
+                data:
+                  message: clear_notification
+                  data:
+                    tag: "{{ notification_tag }}"
 
           - conditions:
               - condition: template
-                value_template: "{{ wait.completed and wait.trigger.event.data.action == action_abort }}"
+                value_template: "{{ wait.completed and wait.trigger.event.data.action == abort_action }}"
             sequence:
-              - service: system_log.write
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ debug_logging }}"
+                    sequence:
+                      - action: system_log.write
+                        data:
+                          level: info
+                          logger: blueprint.rollo_mit_iphone_bestaetigung
+                          message: >-
+                            {{ trigger_label }} abgebrochen. Rollo bleibt unverändert.
+              - action: !input notify_service
                 data:
-                  message: "Abgebrochen"
-                  level: info
+                  message: clear_notification
+                  data:
+                    tag: "{{ notification_tag }}"
 
           - conditions:
               - condition: template
                 value_template: "{{ not wait.completed }}"
             sequence:
-              - service: system_log.write
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ debug_logging }}"
+                    sequence:
+                      - action: system_log.write
+                        data:
+                          level: info
+                          logger: blueprint.rollo_mit_iphone_bestaetigung
+                          message: >-
+                            {{ trigger_label }} nicht innerhalb von {{ timeout_seconds }} Sekunden bestätigt.
+                            Rollo bleibt unverändert.
+              - action: !input notify_service
                 data:
-                  message: "Timeout – keine Bestätigung"
-                  level: info
-
-      - service: "{{ notify_service }}"
-        data:
-          message: clear_notification
-          data:
-            tag: "{{ tag }}"
+                  message: clear_notification
+                  data:
+                    tag: "{{ notification_tag }}"
