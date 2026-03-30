@@ -1,19 +1,12 @@
 blueprint:
-  name: Rollo mit iPhone Bestätigung (robust)
-  description: >
-    Fährt ein Rollo erst nach Bestätigung per iPhone (Actionable Notification).
-    Unterstützt optional:
-    - festen Zeittrigger
-    - Lade-Trigger (angesteckt)
-    - optional: Kabel entfernt
-    - optionales Zeitfenster NUR für Lade-Trigger
-
+  name: Rollo mit iPhone-Bestätigung
+  description: Rollo fährt nur nach Bestätigung per iPhone-Benachrichtigung.
   domain: automation
 
   input:
     mobile_app_device:
       name: iPhone (Mobile App Gerät)
-      description: Gerät aus der Home Assistant Mobile App auswählen
+      description: iPhone in der Home-Assistant-Mobile-App auswählen
       selector:
         device:
           integration: mobile_app
@@ -25,7 +18,8 @@ blueprint:
           domain: cover
 
     cover_action:
-      name: Rollo Aktion
+      name: Rollo-Aktion
+      description: Aktion, die nach Bestätigung ausgeführt wird
       selector:
         select:
           options:
@@ -33,60 +27,12 @@ blueprint:
             - close
       default: close
 
-    # Zeittrigger
-    fixed_time_enabled:
-      name: Zeittrigger aktiv
-      selector:
-        boolean:
-      default: true
-
     fixed_time:
-      name: Uhrzeit
+      name: Feste Uhrzeit
       selector:
         time:
       default: "19:00:00"
 
-    # Lade-Trigger
-    charge_trigger_enabled:
-      name: Lade-Trigger aktiv
-      selector:
-        boolean:
-      default: false
-
-    charge_sensor:
-      name: iPhone Ladezustand Sensor
-      description: battery_state Sensor (z.B. Charging / Not Charging)
-      default: ""
-      selector:
-        entity:
-          domain: sensor
-
-    unplug_trigger_enabled:
-      name: Trigger bei Kabel entfernt
-      selector:
-        boolean:
-      default: false
-
-    # Zeitfenster
-    charge_window_enabled:
-      name: Lade-Zeitfenster aktiv
-      selector:
-        boolean:
-      default: false
-
-    charge_window_start:
-      name: Startzeit Fenster
-      selector:
-        time:
-      default: "21:00:00"
-
-    charge_window_end:
-      name: Endzeit Fenster
-      selector:
-        time:
-      default: "23:00:00"
-
-    # Timeout
     confirmation_timeout:
       name: Bestätigungs-Timeout
       selector:
@@ -94,187 +40,156 @@ blueprint:
       default:
         minutes: 2
 
-    debug:
-      name: Debug Logging
+    debug_logging:
+      name: Debug-Logging aktiv
       selector:
         boolean:
       default: true
 
+mode: single
+max_exceeded: silent
 
-mode: restart
-
-
-trigger_variables:
-  charge_sensor: !input charge_sensor
-  charge_enabled: !input charge_trigger_enabled
-  unplug_enabled: !input unplug_trigger_enabled
+variables:
+  debug_logging: !input debug_logging
+  cover_action: !input cover_action
+  timeout_seconds: >-
+    {% set d = confirmation_timeout.get('days', 0) | int %}
+    {% set h = confirmation_timeout.get('hours', 0) | int %}
+    {% set m = confirmation_timeout.get('minutes', 0) | int %}
+    {% set s = confirmation_timeout.get('seconds', 0) | int %}
+    {{ d * 86400 + h * 3600 + m * 60 + s }}
+  notification_tag: "{{ 'rollo_confirm_' ~ context.id }}"
+  confirm_action: "{{ 'ROLL_CONFIRM_' ~ context.id }}"
+  abort_action: "{{ 'ROLL_ABORT_' ~ context.id }}"
 
 trigger:
   - platform: time
     at: !input fixed_time
-    id: time
-    enabled: !input fixed_time_enabled
-
-  - platform: state
-    entity_id: "{{ charge_sensor }}"
-    to:
-      - "Charging"
-      - "Full"
-    id: charging
-    enabled: "{{ charge_enabled and charge_sensor != '' }}"
-
-  - platform: state
-    entity_id: "{{ charge_sensor }}"
-    to: "Not Charging"
-    id: unplugged
-    enabled: "{{ unplug_enabled and charge_sensor != '' }}"
-
-
-variables:
-  device_id: !input mobile_app_device
-  cover: !input cover_entity
-  action_type: !input cover_action
-  timeout: !input confirmation_timeout
-  debug: !input debug
-  window_enabled: !input charge_window_enabled
-  window_start: !input charge_window_start
-  window_end: !input charge_window_end
-
-  tag: "{{ 'rollo_' ~ context.id }}"
-  action_confirm: "{{ 'CONFIRM_' ~ context.id }}"
-  action_abort: "{{ 'ABORT_' ~ context.id }}"
-
-  window_ok: >-
-    {% if trigger.id != 'charging' or not window_enabled %}
-      true
-    {% else %}
-      {% set s = today_at(window_start) %}
-      {% set e = today_at(window_end) %}
-      {% if s <= e %}
-        {{ s <= now() <= e }}
-      {% else %}
-        {{ now() >= s or now() <= e }}
-      {% endif %}
-    {% endif %}
-
+    id: fixed_time
 
 action:
-
-  # Fenster prüfen
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.id == 'charging' and window_enabled and not (window_ok | bool) }}"
-        sequence:
-          - if:
-              - condition: template
-                value_template: "{{ debug }}"
-            then:
-              - service: system_log.write
-                data:
-                  level: info
-                  message: "Abbruch: außerhalb Zeitfenster"
-          - stop: "Außerhalb Zeitfenster"
-
-  # Logging Start
   - if:
       - condition: template
-        value_template: "{{ debug }}"
+        value_template: "{{ debug_logging }}"
     then:
-      - service: system_log.write
+      - action: logbook.log
         data:
-          level: info
-          message: "Trigger: {{ trigger.id }}"
+          name: Rollo-Bestätigung
+          message: "Trigger ausgelöst: fester Zeittrigger."
+          entity_id: !input cover_entity
 
-  # Notification senden (Device basiert → Dropdown!)
   - device_id: !input mobile_app_device
     domain: mobile_app
     type: notify
-    title: "Rollo bestätigen"
-    message: "Soll das Rollo fahren?"
+    title: Rollo bestätigen
+    message: >-
+      Das Rollo soll jetzt fahren.
+      Bitte innerhalb von {{ timeout_seconds }} Sekunden bestätigen.
     data:
-      tag: "{{ tag }}"
+      tag: "{{ notification_tag }}"
       actions:
-        - action: "{{ action_confirm }}"
-          title: "Ja"
-        - action: "{{ action_abort }}"
-          title: "Nein"
+        - action: "{{ confirm_action }}"
+          title: Bestätigen
+        - action: "{{ abort_action }}"
+          title: Abbrechen
 
-  # Warten auf Antwort
   - wait_for_trigger:
       - platform: event
         event_type: mobile_app_notification_action
         event_data:
-          action: "{{ action_confirm }}"
+          action: "{{ confirm_action }}"
       - platform: event
         event_type: mobile_app_notification_action
         event_data:
-          action: "{{ action_abort }}"
+          action: "{{ abort_action }}"
     timeout: !input confirmation_timeout
 
-  # Auswertung
   - choose:
-
-      # BESTÄTIGT
       - conditions:
           - condition: template
-            value_template: "{{ wait.completed and wait.trigger.event.data.action == action_confirm }}"
+            value_template: "{{ wait.completed and wait.trigger.event.data.action == confirm_action }}"
         sequence:
-
           - if:
               - condition: template
-                value_template: "{{ debug }}"
+                value_template: "{{ debug_logging }}"
             then:
-              - service: system_log.write
+              - action: logbook.log
                 data:
-                  level: info
-                  message: "Bestätigt → fahre Rollo"
+                  name: Rollo-Bestätigung
+                  message: "Bestätigt per iPhone. Rollo wird gefahren."
+                  entity_id: !input cover_entity
 
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ action_type == 'open' }}"
+                    value_template: "{{ cover_action == 'open' }}"
                 sequence:
-                  - service: cover.open_cover
+                  - action: cover.open_cover
                     target:
                       entity_id: !input cover_entity
             default:
-              - service: cover.close_cover
+              - action: cover.close_cover
                 target:
                   entity_id: !input cover_entity
 
-      # ABGEBROCHEN
+          - action: mobile_app.notify
+            data:
+              message: clear_notification
+              target:
+                device_id: !input mobile_app_device
+              data:
+                tag: "{{ notification_tag }}"
+
+          - if:
+              - condition: template
+                value_template: "{{ debug_logging }}"
+            then:
+              - action: logbook.log
+                data:
+                  name: Rollo-Bestätigung
+                  message: "Notification entfernt nach Bestätigung."
+                  entity_id: !input cover_entity
+
       - conditions:
           - condition: template
-            value_template: "{{ wait.completed and wait.trigger.event.data.action == action_abort }}"
+            value_template: "{{ wait.completed and wait.trigger.event.data.action == abort_action }}"
         sequence:
           - if:
               - condition: template
-                value_template: "{{ debug }}"
+                value_template: "{{ debug_logging }}"
             then:
-              - service: system_log.write
+              - action: logbook.log
                 data:
-                  level: info
-                  message: "Abgebrochen"
+                  name: Rollo-Bestätigung
+                  message: "Abgebrochen per iPhone. Rollo bleibt unverändert."
+                  entity_id: !input cover_entity
 
-      # TIMEOUT
+          - action: mobile_app.notify
+            data:
+              message: clear_notification
+              target:
+                device_id: !input mobile_app_device
+              data:
+                tag: "{{ notification_tag }}"
+
       - conditions:
           - condition: template
             value_template: "{{ not wait.completed }}"
         sequence:
           - if:
               - condition: template
-                value_template: "{{ debug }}"
+                value_template: "{{ debug_logging }}"
             then:
-              - service: system_log.write
+              - action: logbook.log
                 data:
-                  level: info
-                  message: "Timeout – keine Antwort"
+                  name: Rollo-Bestätigung
+                  message: "Timeout abgelaufen. Rollo bleibt unverändert."
+                  entity_id: !input cover_entity
 
-  # Notification entfernen
-  - device_id: !input mobile_app_device
-    domain: mobile_app
-    type: notify
-    message: clear_notification
-    data:
-      tag: "{{ tag }}"
+          - action: mobile_app.notify
+            data:
+              message: clear_notification
+              target:
+                device_id: !input mobile_app_device
+              data:
+                tag: "{{ notification_tag }}"
