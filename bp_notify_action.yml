@@ -1,249 +1,209 @@
 blueprint:
-  name: "Bestätigtes Rollo per iPhone – Zeit & Ladezustand"
-  description: >
-    Sendet eine Bestätigungs-Benachrichtigung an ein iPhone via Home Assistant Companion App.
-    Auslösen kann die Automation entweder zu einer festen Zeit oder beim An-/Abstecken des Ladegeräts.
-    Optional kann der Ladezustand nur innerhalb eines Zeitfensters berücksichtigt werden.
+  name: Rollo mit iPhone-Bestätigung
+  description: Rollo fährt erst nach Bestätigung per iPhone. Unterstützt Zeit- oder Lade-Trigger.
   domain: automation
-  homeassistant:
-    min_version: "2024.6.0"
+  author: OpenAI
   input:
+    notify_service:
+      name: iPhone Notify-Service
+      selector:
+        text:
     cover_entity:
       name: Rollo / Cover
-      description: Das zu steuernde Rollo.
       selector:
         entity:
           domain: cover
-
-    notify_device:
-      name: iPhone für die Bestätigung
-      description: Wähle dein iPhone aus. Der passende notify.mobile_app_-Dienst wird daraus abgeleitet.
+    cover_action:
+      name: Rollo-Aktion
       selector:
-        device:
-          filter:
-            - manufacturer: Apple
-
-    trigger_time:
+        select:
+          options:
+            - open
+            - close
+      default: open
+    fixed_time_enabled:
+      name: Fester Zeittrigger aktiv
+      selector:
+        boolean:
+      default: true
+    fixed_time:
       name: Feste Uhrzeit
-      description: Uhrzeit für den täglichen Trigger.
       selector:
         time:
-
-    battery_state_sensor:
+      default: "19:00:00"
+    charge_trigger_enabled:
+      name: Lade-Trigger aktiv
+      selector:
+        boolean:
+      default: false
+    charge_sensor:
       name: iPhone-Ladesensor
-      description: sensor.battery_state des iPhones aus der Home Assistant Companion App.
       selector:
         entity:
           domain: sensor
-
-    use_charging_window:
-      name: Ladezustand nur in Zeitfenster berücksichtigen
+    charge_window_enabled:
+      name: Ladefenster aktiv
+      selector:
+        boolean:
       default: false
+    charge_window_start:
+      name: Ladefenster Start
       selector:
-        boolean:
-
-    charging_window_start:
-      name: Zeitfenster Beginn
+        time:
       default: "21:00:00"
+    charge_window_end:
+      name: Ladefenster Ende
       selector:
         time:
-
-    charging_window_end:
-      name: Zeitfenster Ende
       default: "23:00:00"
-      selector:
-        time:
-
-    only_if_open:
-      name: Nur ausführen, wenn das Rollo offen ist
-      default: true
+    unplug_trigger_enabled:
+      name: Trigger bei Kabel entfernt
       selector:
         boolean:
-
-    confirm_timeout:
-      name: Bestätigungsfenster
-      description: Wie lange auf die Bestätigung gewartet wird.
-      default:
-        minutes: 2
+      default: false
+    confirmation_timeout:
+      name: Timeout
       selector:
         duration:
-          enable_second: true
-
-    notification_title:
-      name: Titel
-      default: "Rollo schließen?"
-      selector:
-        text:
-
-    notification_message:
-      name: Nachricht
-      default: "Bitte innerhalb von 120 Sekunden bestätigen, sonst bleibt das Rollo offen."
-      selector:
-        text:
-
-    confirm_button_text:
-      name: Bestätigen-Button
-      default: "Rollo schließen"
-      selector:
-        text:
-
-    cancel_button_text:
-      name: Abbrechen-Button
-      default: "Offen lassen"
-      selector:
-        text:
-
-    require_unlock_on_confirm:
-      name: Bestätigung nur mit Gerätefreigabe
-      default: false
+      default:
+        minutes: 2
+    debug_logging:
+      name: Debug Logging
       selector:
         boolean:
+      default: true
 
-mode: single
-max_exceeded: silent
-
-triggers:
-  - trigger: time
-    at: !input trigger_time
-    id: scheduled
-
-  - trigger: state
-    entity_id: !input battery_state_sensor
-    to: "Charging"
-    id: charging_on
-
-  - trigger: state
-    entity_id: !input battery_state_sensor
-    to: "Not Charging"
-    id: charging_off
+mode: parallel
+max: 10
 
 variables:
-  cover_entity_id: !input cover_entity
-  notify_device_id: !input notify_device
-  only_if_open_input: !input only_if_open
-  use_charging_window_input: !input use_charging_window
-  charging_window_start_input: !input charging_window_start
-  charging_window_end_input: !input charging_window_end
-  allow_charging_trigger: >-
-    {{ not use_charging_window_input or
-       (now().strftime('%H:%M:%S') >= charging_window_start_input and
-        now().strftime('%H:%M:%S') < charging_window_end_input) }}
-  notify_service_name: >-
-    notify.mobile_app_{{ device_attr(notify_device_id, 'name') | slugify }}
-  action_confirm: "{{ 'CONFIRM_ROLLO_' ~ context.id }}"
-  action_cancel: "{{ 'CANCEL_ROLLO_' ~ context.id }}"
-  notification_tag: "{{ 'rollo_confirm_' ~ context.id }}"
+  notify_service: !input notify_service
+  cover_action: !input cover_action
+  charge_window_enabled: !input charge_window_enabled
+  charge_window_start: !input charge_window_start
+  charge_window_end: !input charge_window_end
+  debug_logging: !input debug_logging
 
-actions:
+trigger:
+  - platform: time
+    id: time
+    at: !input fixed_time
+    enabled: !input fixed_time_enabled
+
+  - platform: state
+    id: charging
+    entity_id: !input charge_sensor
+    to:
+      - "Charging"
+      - "Full"
+    enabled: !input charge_trigger_enabled
+
+  - platform: state
+    id: unplugged
+    entity_id: !input charge_sensor
+    to: "Not Charging"
+    enabled: !input unplug_trigger_enabled
+
+action:
+  - variables:
+      tag: "{{ 'rollo_' ~ context.id }}"
+      action_confirm: "{{ 'CONFIRM_' ~ context.id }}"
+      action_abort: "{{ 'ABORT_' ~ context.id }}"
+      window_ok: >-
+        {% if trigger.id != 'charging' or not charge_window_enabled %}
+          true
+        {% else %}
+          {% set start = today_at(charge_window_start) %}
+          {% set end = today_at(charge_window_end) %}
+          {% if start <= end %}
+            {{ start <= now() <= end }}
+          {% else %}
+            {{ now() >= start or now() <= end }}
+          {% endif %}
+        {% endif %}
+
   - choose:
-      - alias: Zeittrigger
-        conditions:
-          - condition: trigger
-            id: scheduled
+      - conditions:
           - condition: template
-            value_template: "{{ (not only_if_open_input) or is_state(cover_entity_id, 'open') }}"
+            value_template: "{{ trigger.id == 'charging' and charge_window_enabled and not (window_ok | bool) }}"
         sequence:
-          - action: "{{ notify_service_name }}"
+          - service: system_log.write
             data:
-              title: !input notification_title
-              message: !input notification_message
-              data:
-                tag: "{{ notification_tag }}"
-                actions:
-                  - action: "{{ action_confirm }}"
-                    title: !input confirm_button_text
-                    authenticationRequired: !input require_unlock_on_confirm
-                  - action: "{{ action_cancel }}"
-                    title: !input cancel_button_text
-          - wait_for_trigger:
-              - trigger: event
-                event_type: mobile_app_notification_action
-                event_data:
-                  action: "{{ action_confirm }}"
-              - trigger: event
-                event_type: mobile_app_notification_action
-                event_data:
-                  action: "{{ action_cancel }}"
-            timeout: !input confirm_timeout
-            continue_on_timeout: true
-          - choose:
-              - conditions: "{{ wait.trigger is not none and wait.trigger.event.data.action == action_confirm }}"
-                sequence:
-                  - action: "{{ notify_service_name }}"
-                    data:
-                      message: clear_notification
-                      data:
-                        tag: "{{ notification_tag }}"
-                  - action: cover.close_cover
-                    target:
-                      entity_id: !input cover_entity
-              - conditions: "{{ wait.trigger is not none and wait.trigger.event.data.action == action_cancel }}"
-                sequence:
-                  - action: "{{ notify_service_name }}"
-                    data:
-                      message: clear_notification
-                      data:
-                        tag: "{{ notification_tag }}"
-            default:
-              - action: "{{ notify_service_name }}"
-                data:
-                  message: clear_notification
-                  data:
-                    tag: "{{ notification_tag }}"
+              message: "Trigger außerhalb Ladefenster – Abbruch"
+              level: info
 
-      - alias: Ladezustand
-        conditions:
-          - condition: trigger
-            id:
-              - charging_on
-              - charging_off
-          - condition: template
-            value_template: "{{ allow_charging_trigger and ((not only_if_open_input) or is_state(cover_entity_id, 'open')) }}"
-        sequence:
-          - action: "{{ notify_service_name }}"
-            data:
-              title: !input notification_title
-              message: !input notification_message
-              data:
-                tag: "{{ notification_tag }}"
-                actions:
-                  - action: "{{ action_confirm }}"
-                    title: !input confirm_button_text
-                    authenticationRequired: !input require_unlock_on_confirm
-                  - action: "{{ action_cancel }}"
-                    title: !input cancel_button_text
-          - wait_for_trigger:
-              - trigger: event
-                event_type: mobile_app_notification_action
-                event_data:
-                  action: "{{ action_confirm }}"
-              - trigger: event
-                event_type: mobile_app_notification_action
-                event_data:
-                  action: "{{ action_cancel }}"
-            timeout: !input confirm_timeout
-            continue_on_timeout: true
-          - choose:
-              - conditions: "{{ wait.trigger is not none and wait.trigger.event.data.action == action_confirm }}"
-                sequence:
-                  - action: "{{ notify_service_name }}"
-                    data:
-                      message: clear_notification
-                      data:
-                        tag: "{{ notification_tag }}"
-                  - action: cover.close_cover
-                    target:
-                      entity_id: !input cover_entity
-              - conditions: "{{ wait.trigger is not none and wait.trigger.event.data.action == action_cancel }}"
-                sequence:
-                  - action: "{{ notify_service_name }}"
-                    data:
-                      message: clear_notification
-                      data:
-                        tag: "{{ notification_tag }}"
-            default:
-              - action: "{{ notify_service_name }}"
+    default:
+      - service: system_log.write
+        data:
+          message: "Trigger {{ trigger.id }} ausgelöst"
+          level: info
+
+      - service: "{{ notify_service }}"
+        data:
+          title: "Rollo bestätigen"
+          message: "Soll das Rollo fahren?"
+          data:
+            tag: "{{ tag }}"
+            actions:
+              - action: "{{ action_confirm }}"
+                title: "Ja"
+              - action: "{{ action_abort }}"
+                title: "Nein"
+
+      - wait_for_trigger:
+          - platform: event
+            event_type: mobile_app_notification_action
+            event_data:
+              action: "{{ action_confirm }}"
+          - platform: event
+            event_type: mobile_app_notification_action
+            event_data:
+              action: "{{ action_abort }}"
+        timeout: !input confirmation_timeout
+
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ wait.completed and wait.trigger.event.data.action == action_confirm }}"
+            sequence:
+              - service: system_log.write
                 data:
-                  message: clear_notification
-                  data:
-                    tag: "{{ notification_tag }}"
+                  message: "Bestätigt – Rollo fährt"
+                  level: info
+
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ cover_action == 'open' }}"
+                    sequence:
+                      - service: cover.open_cover
+                        target:
+                          entity_id: !input cover_entity
+                  - default:
+                      - service: cover.close_cover
+                        target:
+                          entity_id: !input cover_entity
+
+          - conditions:
+              - condition: template
+                value_template: "{{ wait.completed and wait.trigger.event.data.action == action_abort }}"
+            sequence:
+              - service: system_log.write
+                data:
+                  message: "Abgebrochen"
+                  level: info
+
+          - conditions:
+              - condition: template
+                value_template: "{{ not wait.completed }}"
+            sequence:
+              - service: system_log.write
+                data:
+                  message: "Timeout – keine Bestätigung"
+                  level: info
+
+      - service: "{{ notify_service }}"
+        data:
+          message: clear_notification
+          data:
+            tag: "{{ tag }}"
