@@ -3,7 +3,6 @@ blueprint:
   description: >
     Sendet eine Bestätigungs-Benachrichtigung an die Home Assistant App.
     Erst nach Bestätigung wird das Rollo geschlossen. Bei Timeout bleibt es offen.
-    Optional kannst du eigene Aktionen bei Bestätigung, Abbruch, Timeout oder Skip ergänzen.
   domain: automation
   input:
     trigger_time:
@@ -20,7 +19,7 @@ blueprint:
           domain: cover
 
     notify_service:
-      name: iPhone-Notify-Service
+      name: Notify-Service des iPhones
       description: Zum Beispiel notify.mobile_app_dein_iphone
       selector:
         text:
@@ -42,7 +41,7 @@ blueprint:
 
     notification_message:
       name: Nachricht
-      default: "Bitte innerhalb von 120 Sekunden bestätigen, sonst bleibt das Rollo offen."
+      default: "Bitte innerhalb des Zeitfensters bestätigen, sonst bleibt das Rollo offen."
       selector:
         text:
 
@@ -65,56 +64,33 @@ blueprint:
         boolean:
 
     require_unlock_on_confirm:
-      name: Bestätigung nur nach Entsperren
-      description: iOS unterstützt eine zusätzliche Geräte-Authentifizierung auf dem Button.
+      name: Bestätigung nur mit Gerätefreigabe
+      description: Wird auf iOS als authenticationRequired an den Button übergeben.
       default: false
       selector:
         boolean:
 
-    on_confirm_actions:
-      name: Zusätzliche Aktionen bei Bestätigung
-      default: []
-      selector:
-        action:
-
-    on_cancel_actions:
-      name: Zusätzliche Aktionen bei Abbruch
-      default: []
-      selector:
-        action:
-
-    on_timeout_actions:
-      name: Zusätzliche Aktionen bei Timeout
-      default: []
-      selector:
-        action:
-
-    on_skip_actions:
-      name: Zusätzliche Aktionen, wenn bereits geschlossen
-      default: []
-      selector:
-        action:
-
 mode: single
 max_exceeded: silent
 
-trigger:
+triggers:
   - trigger: time
     at: !input trigger_time
 
 variables:
   cover_entity_id: !input cover_entity
+  notify_service_id: !input notify_service
   require_open: !input only_if_open
   action_confirm: "{{ 'CONFIRM_ROLLO_' ~ context.id }}"
   action_cancel: "{{ 'CANCEL_ROLLO_' ~ context.id }}"
   notification_tag: "{{ 'rollo_confirm_' ~ context.id }}"
 
-action:
+actions:
   - if:
       - condition: template
         value_template: "{{ (not require_open) or is_state(cover_entity_id, 'open') }}"
     then:
-      - action: !input notify_service
+      - action: "{{ notify_service_id }}"
         data:
           title: !input notification_title
           message: !input notification_message
@@ -142,7 +118,7 @@ action:
       - choose:
           - conditions: "{{ wait.trigger is not none and wait.trigger.event.data.action == action_confirm }}"
             sequence:
-              - action: !input notify_service
+              - action: "{{ notify_service_id }}"
                 data:
                   message: clear_notification
                   data:
@@ -150,28 +126,18 @@ action:
               - action: cover.close_cover
                 target:
                   entity_id: !input cover_entity
-              - choose: []
-                default: !input on_confirm_actions
 
           - conditions: "{{ wait.trigger is not none and wait.trigger.event.data.action == action_cancel }}"
             sequence:
-              - action: !input notify_service
+              - action: "{{ notify_service_id }}"
                 data:
                   message: clear_notification
                   data:
                     tag: "{{ notification_tag }}"
-              - choose: []
-                default: !input on_cancel_actions
 
         default:
-          - action: !input notify_service
+          - action: "{{ notify_service_id }}"
             data:
               message: clear_notification
               data:
                 tag: "{{ notification_tag }}"
-          - choose: []
-            default: !input on_timeout_actions
-
-    else:
-      - choose: []
-        default: !input on_skip_actions
