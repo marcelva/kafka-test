@@ -1,33 +1,32 @@
 blueprint:
-  name: Rollo mit iPhone Bestätigung (erweitert & stabil)
+  name: Rollo mit iPhone Bestätigung (FINAL stabil)
   description: >
-    Führt eine auswählbare Aktion (z.B. Rollo öffnen/schließen/stoppen oder Szene/Skript)
-    zu einer festen Uhrzeit aus – aber nur nach Bestätigung per iPhone (Actionable Notification).
-    Enthält Debug-Logging und ist robust aufgebaut.
+    Führt eine Aktion (Cover / Szene / Script / Service) nur nach iPhone-Bestätigung aus.
+    Ausgelöst durch festen Zeittrigger.
 
   domain: automation
 
   input:
     mobile_app_device:
-      name: iPhone (Mobile App Gerät)
+      name: iPhone Gerät
       selector:
         device:
           integration: mobile_app
 
     action_mode:
       name: Aktionstyp
-      description: Welche Art von Aktion soll ausgeführt werden
       selector:
         select:
           options:
             - cover
             - scene
             - script
-            - custom_service
+            - service
       default: cover
 
     cover_entity:
       name: Rollo / Cover
+      default: ""
       selector:
         entity:
           domain: cover
@@ -50,19 +49,19 @@ blueprint:
           domain: scene
 
     script_entity:
-      name: Skript
+      name: Script
       default: ""
       selector:
         entity:
           domain: script
 
-    custom_service:
-      name: Eigener Service (z.B. light.turn_on)
+    service_name:
+      name: Service (z.B. light.turn_on)
       default: ""
       selector:
         text:
 
-    time_trigger:
+    trigger_time:
       name: Uhrzeit
       selector:
         time:
@@ -91,7 +90,7 @@ blueprint:
         - sun
 
     timeout:
-      name: Bestätigungs-Timeout
+      name: Timeout
       selector:
         duration:
       default:
@@ -109,7 +108,7 @@ mode: restart
 
 trigger:
   - platform: time
-    at: !input time_trigger
+    at: !input trigger_time
 
 
 condition:
@@ -118,65 +117,55 @@ condition:
 
 
 variables:
-  device_id: !input mobile_app_device
   mode_selected: !input action_mode
-  cover: !input cover_entity
+  cover_entity: !input cover_entity
   cover_action: !input cover_action
-  scene: !input scene_entity
-  script: !input script_entity
-  custom_service: !input custom_service
-  timeout: !input timeout
+  scene_entity: !input scene_entity
+  script_entity: !input script_entity
+  service_name: !input service_name
   debug: !input debug
 
   tag: "{{ 'rollo_' ~ context.id }}"
-  action_confirm: "{{ 'CONFIRM_' ~ context.id }}"
-  action_abort: "{{ 'ABORT_' ~ context.id }}"
-
-  timeout_seconds: >-
-    {% set d = timeout.get('days', 0) | int %}
-    {% set h = timeout.get('hours', 0) | int %}
-    {% set m = timeout.get('minutes', 0) | int %}
-    {% set s = timeout.get('seconds', 0) | int %}
-    {{ d * 86400 + h * 3600 + m * 60 + s }}
+  confirm: "{{ 'CONFIRM_' ~ context.id }}"
+  abort: "{{ 'ABORT_' ~ context.id }}"
 
 
 action:
 
-  # Start Logging
+  # Debug Start
   - if:
       - condition: template
         value_template: "{{ debug }}"
     then:
       - service: logbook.log
         data:
-          name: Blueprint Aktion
-          message: "Zeittrigger ausgelöst"
-          entity_id: !input cover_entity
+          name: Blueprint
+          message: "Trigger ausgelöst"
 
   # Notification
   - device_id: !input mobile_app_device
     domain: mobile_app
     type: notify
     title: "Aktion bestätigen"
-    message: "Soll die konfigurierte Aktion ausgeführt werden?"
+    message: "Aktion ausführen?"
     data:
       tag: "{{ tag }}"
       actions:
-        - action: "{{ action_confirm }}"
+        - action: "{{ confirm }}"
           title: "Ja"
-        - action: "{{ action_abort }}"
+        - action: "{{ abort }}"
           title: "Nein"
 
-  # Warten
+  # Wait
   - wait_for_trigger:
       - platform: event
         event_type: mobile_app_notification_action
         event_data:
-          action: "{{ action_confirm }}"
+          action: "{{ confirm }}"
       - platform: event
         event_type: mobile_app_notification_action
         event_data:
-          action: "{{ action_abort }}"
+          action: "{{ abort }}"
     timeout: !input timeout
 
   # Entscheidung
@@ -185,7 +174,7 @@ action:
       # BESTÄTIGT
       - conditions:
           - condition: template
-            value_template: "{{ wait.completed and wait.trigger.event.data.action == action_confirm }}"
+            value_template: "{{ wait.completed and wait.trigger.event.data.action == confirm }}"
         sequence:
 
           - if:
@@ -194,40 +183,31 @@ action:
             then:
               - service: logbook.log
                 data:
-                  name: Blueprint Aktion
-                  message: "Bestätigt – führe Aktion aus"
+                  name: Blueprint
+                  message: "Bestätigt"
 
           - choose:
 
               # COVER
               - conditions:
                   - condition: template
-                    value_template: "{{ mode_selected == 'cover' }}"
+                    value_template: "{{ mode_selected == 'cover' and cover_entity != '' }}"
                 sequence:
-                  - choose:
-                      - conditions:
-                          - condition: template
-                            value_template: "{{ cover_action == 'open' }}"
-                        sequence:
-                          - service: cover.open_cover
-                            target:
-                              entity_id: !input cover_entity
-                      - conditions:
-                          - condition: template
-                            value_template: "{{ cover_action == 'stop' }}"
-                        sequence:
-                          - service: cover.stop_cover
-                            target:
-                              entity_id: !input cover_entity
-                    default:
-                      - service: cover.close_cover
-                        target:
-                          entity_id: !input cover_entity
+                  - service: >
+                      {% if cover_action == 'open' %}
+                        cover.open_cover
+                      {% elif cover_action == 'stop' %}
+                        cover.stop_cover
+                      {% else %}
+                        cover.close_cover
+                      {% endif %}
+                    target:
+                      entity_id: !input cover_entity
 
               # SCENE
               - conditions:
                   - condition: template
-                    value_template: "{{ mode_selected == 'scene' and scene != '' }}"
+                    value_template: "{{ mode_selected == 'scene' and scene_entity != '' }}"
                 sequence:
                   - service: scene.turn_on
                     target:
@@ -236,46 +216,38 @@ action:
               # SCRIPT
               - conditions:
                   - condition: template
-                    value_template: "{{ mode_selected == 'script' and script != '' }}"
+                    value_template: "{{ mode_selected == 'script' and script_entity != '' }}"
                 sequence:
                   - service: script.turn_on
                     target:
                       entity_id: !input script_entity
 
-              # CUSTOM SERVICE
+              # SERVICE
               - conditions:
                   - condition: template
-                    value_template: "{{ mode_selected == 'custom_service' and custom_service != '' }}"
+                    value_template: "{{ mode_selected == 'service' and service_name != '' }}"
                 sequence:
-                  - service: "{{ custom_service }}"
+                  - service: "{{ service_name }}"
 
-      # ABGEBROCHEN
+      # ABBRUCH
       - conditions:
           - condition: template
-            value_template: "{{ wait.completed and wait.trigger.event.data.action == action_abort }}"
+            value_template: "{{ wait.completed and wait.trigger.event.data.action == abort }}"
         sequence:
-          - if:
-              - condition: template
-                value_template: "{{ debug }}"
-            then:
-              - service: logbook.log
-                data:
-                  name: Blueprint Aktion
-                  message: "Abgebrochen"
+          - service: logbook.log
+            data:
+              name: Blueprint
+              message: "Abgebrochen"
 
       # TIMEOUT
       - conditions:
           - condition: template
             value_template: "{{ not wait.completed }}"
         sequence:
-          - if:
-              - condition: template
-                value_template: "{{ debug }}"
-            then:
-              - service: logbook.log
-                data:
-                  name: Blueprint Aktion
-                  message: "Timeout – keine Antwort"
+          - service: logbook.log
+            data:
+              name: Blueprint
+              message: "Timeout"
 
   # Notification entfernen
   - device_id: !input mobile_app_device
