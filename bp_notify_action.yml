@@ -1,0 +1,177 @@
+blueprint:
+  name: "Bestätigtes Rollo per iPhone"
+  description: >
+    Sendet eine Bestätigungs-Benachrichtigung an die Home Assistant App.
+    Erst nach Bestätigung wird das Rollo geschlossen. Bei Timeout bleibt es offen.
+    Optional kannst du eigene Aktionen bei Bestätigung, Abbruch, Timeout oder Skip ergänzen.
+  domain: automation
+  input:
+    trigger_time:
+      name: Auslösezeit
+      description: Wann die Bestätigungsanfrage gesendet werden soll.
+      selector:
+        time:
+
+    cover_entity:
+      name: Rollo / Cover
+      description: Das zu steuernde Cover.
+      selector:
+        entity:
+          domain: cover
+
+    notify_service:
+      name: iPhone-Notify-Service
+      description: Zum Beispiel notify.mobile_app_dein_iphone
+      selector:
+        text:
+
+    confirm_timeout:
+      name: Bestätigungsfenster
+      description: Wie lange auf die Bestätigung gewartet wird.
+      default:
+        minutes: 2
+      selector:
+        duration:
+          enable_second: true
+
+    notification_title:
+      name: Titel
+      default: "Rollo schließen?"
+      selector:
+        text:
+
+    notification_message:
+      name: Nachricht
+      default: "Bitte innerhalb von 120 Sekunden bestätigen, sonst bleibt das Rollo offen."
+      selector:
+        text:
+
+    confirm_button_text:
+      name: Bestätigen-Button
+      default: "Rollo schließen"
+      selector:
+        text:
+
+    cancel_button_text:
+      name: Abbrechen-Button
+      default: "Offen lassen"
+      selector:
+        text:
+
+    only_if_open:
+      name: Nur ausführen, wenn das Rollo offen ist
+      default: true
+      selector:
+        boolean:
+
+    require_unlock_on_confirm:
+      name: Bestätigung nur nach Entsperren
+      description: iOS unterstützt eine zusätzliche Geräte-Authentifizierung auf dem Button.
+      default: false
+      selector:
+        boolean:
+
+    on_confirm_actions:
+      name: Zusätzliche Aktionen bei Bestätigung
+      default: []
+      selector:
+        action:
+
+    on_cancel_actions:
+      name: Zusätzliche Aktionen bei Abbruch
+      default: []
+      selector:
+        action:
+
+    on_timeout_actions:
+      name: Zusätzliche Aktionen bei Timeout
+      default: []
+      selector:
+        action:
+
+    on_skip_actions:
+      name: Zusätzliche Aktionen, wenn bereits geschlossen
+      default: []
+      selector:
+        action:
+
+mode: single
+max_exceeded: silent
+
+trigger:
+  - trigger: time
+    at: !input trigger_time
+
+variables:
+  cover_entity_id: !input cover_entity
+  require_open: !input only_if_open
+  action_confirm: "{{ 'CONFIRM_ROLLO_' ~ context.id }}"
+  action_cancel: "{{ 'CANCEL_ROLLO_' ~ context.id }}"
+  notification_tag: "{{ 'rollo_confirm_' ~ context.id }}"
+
+action:
+  - if:
+      - condition: template
+        value_template: "{{ (not require_open) or is_state(cover_entity_id, 'open') }}"
+    then:
+      - action: !input notify_service
+        data:
+          title: !input notification_title
+          message: !input notification_message
+          data:
+            tag: "{{ notification_tag }}"
+            actions:
+              - action: "{{ action_confirm }}"
+                title: !input confirm_button_text
+                authenticationRequired: !input require_unlock_on_confirm
+              - action: "{{ action_cancel }}"
+                title: !input cancel_button_text
+
+      - wait_for_trigger:
+          - trigger: event
+            event_type: mobile_app_notification_action
+            event_data:
+              action: "{{ action_confirm }}"
+          - trigger: event
+            event_type: mobile_app_notification_action
+            event_data:
+              action: "{{ action_cancel }}"
+        timeout: !input confirm_timeout
+        continue_on_timeout: true
+
+      - choose:
+          - conditions: "{{ wait.trigger is not none and wait.trigger.event.data.action == action_confirm }}"
+            sequence:
+              - action: !input notify_service
+                data:
+                  message: clear_notification
+                  data:
+                    tag: "{{ notification_tag }}"
+              - action: cover.close_cover
+                target:
+                  entity_id: !input cover_entity
+              - choose: []
+                default: !input on_confirm_actions
+
+          - conditions: "{{ wait.trigger is not none and wait.trigger.event.data.action == action_cancel }}"
+            sequence:
+              - action: !input notify_service
+                data:
+                  message: clear_notification
+                  data:
+                    tag: "{{ notification_tag }}"
+              - choose: []
+                default: !input on_cancel_actions
+
+        default:
+          - action: !input notify_service
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ notification_tag }}"
+          - choose: []
+            default: !input on_timeout_actions
+
+    else:
+      - choose: []
+        default: !input on_skip_actions
