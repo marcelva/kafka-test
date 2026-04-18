@@ -1,0 +1,198 @@
+blueprint:
+  name: Rasenbewässerung mit optionalem Wettercheck
+  description: >
+    Startet eine Rasenbewässerung zu einer frei wählbaren Uhrzeit, schaltet ein
+    beliebiges Schaltgerät (z. B. Zigbee-Steckdose oder Relais) für eine frei
+    definierbare Dauer ein und sendet optionale Start-/Endbenachrichtigungen an
+    Home-Assistant-App-Geräte. Optional kann eine Wetter-Entität vor dem Start
+    geprüft werden, um Bewässerung bei Niederschlagswahrscheinlichkeit oder
+    Niederschlagsmenge zu überspringen.
+  domain: automation
+  input:
+    watering_switch:
+      name: Schaltgerät für Wasser
+      description: Schaltgerät, das die Bewässerung ein- und ausschaltet.
+      selector:
+        entity:
+          domain: switch
+
+    watering_time:
+      name: Startzeit
+      description: Uhrzeit, zu der die Bewässerung starten soll.
+      selector:
+        time: {}
+
+    watering_duration_minutes:
+      name: Laufzeit in Minuten
+      description: Wie lange das Wasser eingeschaltet bleibt.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 180
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+
+    lawn_name:
+      name: Name der Bewässerung
+      description: Wird in Benachrichtigungen angezeigt.
+      default: Rasen
+      selector:
+        text: {}
+
+    use_weather_check:
+      name: Wetterprüfung aktivieren
+      description: Vor dem Start anhand der Forecast-Daten prüfen.
+      default: false
+      selector:
+        boolean: {}
+
+    weather_entity:
+      name: Wetter-Entität
+      description: Wetter-Entity für die Niederschlagsprüfung. Nur nötig, wenn die Wetterprüfung aktiviert ist.
+      default: ""
+      selector:
+        entity:
+          domain: weather
+
+    forecast_lookahead_hours:
+      name: Forecast-Zeitraum
+      description: Wie viele Stunden in die Zukunft geprüft wird.
+      default: 6
+      selector:
+        number:
+          min: 1
+          max: 24
+          step: 1
+          unit_of_measurement: h
+          mode: slider
+
+    rain_probability_threshold:
+      name: Niederschlagswahrscheinlichkeit
+      description: Ab diesem Prozentwert wird die Bewässerung übersprungen.
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    rain_amount_threshold:
+      name: Niederschlagsmenge
+      description: Ab diesem mm-Wert wird die Bewässerung übersprungen.
+      default: 0.2
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.1
+          unit_of_measurement: mm
+          mode: slider
+
+    notify_targets:
+      name: Benachrichtigung an
+      description: Optional mehrere notify-Entitäten auswählen, z. B. Home-Assistant-App-Geräte.
+      default: []
+      selector:
+        entity:
+          domain: notify
+          multiple: true
+
+mode: single
+max_exceeded: silent
+
+variables:
+  watering_switch: !input watering_switch
+  watering_duration_minutes: !input watering_duration_minutes
+  lawn_name: !input lawn_name
+  use_weather_check: !input use_weather_check
+  weather_entity: !input weather_entity
+  forecast_lookahead_hours: !input forecast_lookahead_hours
+  rain_probability_threshold: !input rain_probability_threshold
+  rain_amount_threshold: !input rain_amount_threshold
+  notify_targets: !input notify_targets
+
+trigger:
+  - platform: time
+    at: !input watering_time
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ use_weather_check and weather_entity }}"
+        sequence:
+          - action: weather.get_forecasts
+            target:
+              entity_id: !input weather_entity
+            data:
+              type: hourly
+            response_variable: weather_forecast
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {% if use_weather_check and weather_entity %}
+                {% set forecast_data = weather_forecast[weather_entity].forecast
+                  if weather_forecast is defined and weather_entity in weather_forecast
+                  else [] %}
+                {% set ns = namespace(skip=false) %}
+                {% for item in forecast_data[:forecast_lookahead_hours | int] %}
+                  {% set probability = item.precipitation_probability | default(0) | float(0) %}
+                  {% set amount = item.precipitation | default(0) | float(0) %}
+                  {% if probability >= (rain_probability_threshold | float(0))
+                        or amount >= (rain_amount_threshold | float(0)) %}
+                    {% set ns.skip = true %}
+                  {% endif %}
+                {% endfor %}
+                {{ not ns.skip }}
+              {% else %}
+                true
+              {% endif %}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_targets | default([]) | length > 0 }}"
+                sequence:
+                  - action: notify.send_message
+                    data:
+                      entity_id: !input notify_targets
+                      title: "{{ lawn_name }}"
+                      message: >-
+                        🌱 {{ lawn_name }} startet jetzt für {{ watering_duration_minutes }} Minuten.
+          - action: switch.turn_on
+            target:
+              entity_id: !input watering_switch
+          - delay:
+              minutes: !input watering_duration_minutes
+          - action: switch.turn_off
+            target:
+              entity_id: !input watering_switch
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_targets | default([]) | length > 0 }}"
+                sequence:
+                  - action: notify.send_message
+                    data:
+                      entity_id: !input notify_targets
+                      title: "{{ lawn_name }}"
+                      message: >-
+                        ✅ {{ lawn_name }} ist fertig. Bewässerung beendet.
+    default:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ notify_targets | default([]) | length > 0 }}"
+            sequence:
+              - action: notify.send_message
+                data:
+                  entity_id: !input notify_targets
+                  title: "{{ lawn_name }}"
+                  message: >-
+                    ⛅ {{ lawn_name }} wurde heute wegen Wetterdaten übersprungen.
