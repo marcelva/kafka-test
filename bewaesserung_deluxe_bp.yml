@@ -1,59 +1,19 @@
-blueprint:
-  name: Rasenbewässerung mit Wettercheck, iPhone-Info und Sonnen-Trigger
-  description: >
-    Startet eine Rasenbewässerung zu einer festen Uhrzeit oder relativ zu
-    Sonnenaufgang/Sonnenuntergang. Optional wird vor dem Start eine
-    Wettervorhersage geprüft. Danach erhält das iPhone eine Meldung mit dem
-    berechneten Regenwert – unabhängig davon, ob die Bewässerung läuft oder
-    übersprungen wird.
-  domain: automation
 
+blueprint:
+  name: Rasenbewässerung mit Wettercheck, Sonnenoffset und iPhone-Notify
+  description: >
+    Startet eine Bewässerung zu fester Uhrzeit oder relativ zu Sonnenaufgang/-untergang,
+    prüft optional OpenWeatherMap-Stundenforecast, Bodenfeuchte, Wind und Frost,
+    sendet immer eine Benachrichtigung mit dem berechneten Regenwert und meldet
+    Start/Ende/Übersprung sauber zurück.
+  domain: automation
   input:
     watering_switch:
       name: Schaltgerät für Wasser
-      description: Schaltet die Bewässerung ein und aus.
+      description: Schaltgerät, das die Bewässerung ein- und ausschaltet.
       selector:
         entity:
           domain: switch
-
-    use_fixed_time:
-      name: Feste Uhrzeit verwenden
-      description: Aktivieren, wenn die Bewässerung zu einer festen Uhrzeit starten soll.
-      default: true
-      selector:
-        boolean:
-
-    watering_time:
-      name: Feste Startzeit
-      description: Wird verwendet, wenn 'Feste Uhrzeit verwenden' aktiv ist.
-      selector:
-        time:
-
-    use_sun_schedule:
-      name: Sonnenaufgang/Sonnenuntergang verwenden
-      description: Aktivieren, wenn der Start an Sonnenereignisse gekoppelt werden soll.
-      default: false
-      selector:
-        boolean:
-
-    sun_event:
-      name: Sonnenereignis
-      description: Sonnenaufgang oder Sonnenuntergang.
-      default: sunrise
-      selector:
-        select:
-          options:
-            - sunrise
-            - sunset
-
-    sun_offset:
-      name: Offset zum Sonnenereignis
-      description: >
-        Offset im Format HH:MM:SS. Negativ für vorher, positiv für nachher.
-        Beispiel: -01:00:00 = eine Stunde vor Sonnenaufgang.
-      default: '-01:00:00'
-      selector:
-        text:
 
     watering_duration_minutes:
       name: Laufzeit in Minuten
@@ -67,27 +27,72 @@ blueprint:
           unit_of_measurement: min
           mode: slider
 
-    lawn_name:
-      name: Name der Bewässerung
-      description: Wird in Benachrichtigungen angezeigt.
-      default: Rasen
+    start_mode:
+      name: Startmodus
+      description: Wähle feste Uhrzeit, Sonnenaufgang oder Sonnenuntergang.
+      default: fixed_time
+      selector:
+        select:
+          options:
+            - label: Feste Uhrzeit
+              value: fixed_time
+            - label: Sonnenaufgang
+              value: sunrise
+            - label: Sonnenuntergang
+              value: sunset
+
+    watering_time:
+      name: Startzeit
+      description: Uhrzeit, die bei "Feste Uhrzeit" verwendet wird.
+      default: "06:00:00"
+      selector:
+        time: {}
+
+    sun_offset:
+      name: Sonnen-Offset
+      description: >
+        Offset relativ zum Sonnenereignis. Beispiel: -01:00:00 startet eine Stunde vor Sonnenaufgang/-untergang.
+      default: "-01:00:00"
       selector:
         text:
+          type: text
+
+    weekdays:
+      name: Bewässerungstage
+      description: Optional. Wenn gesetzt, läuft die Automation nur an diesen Wochentagen.
+      default: []
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Montag
+              value: mon
+            - label: Dienstag
+              value: tue
+            - label: Mittwoch
+              value: wed
+            - label: Donnerstag
+              value: thu
+            - label: Freitag
+              value: fri
+            - label: Samstag
+              value: sat
+            - label: Sonntag
+              value: sun
+
+    weather_entity:
+      name: Wetter-Entität
+      description: Wetter-Entity für die Niederschlagsprüfung, zum Beispiel weather.openweathermap.
+      selector:
+        entity:
+          domain: weather
 
     use_weather_check:
       name: Wetterprüfung aktivieren
       description: Vor dem Start anhand der Forecast-Daten prüfen.
-      default: false
+      default: true
       selector:
-        boolean:
-
-    weather_entity:
-      name: Wetter-Entität
-      description: Wetter-Entity für die Niederschlagsprüfung.
-      default: ''
-      selector:
-        entity:
-          domain: weather
+        boolean: {}
 
     forecast_lookahead_hours:
       name: Forecast-Zeitraum
@@ -103,211 +108,333 @@ blueprint:
 
     rain_probability_threshold:
       name: Niederschlagswahrscheinlichkeit
-      description: Ab diesem Prozentwert wird die Bewässerung übersprungen.
+      description: Ab diesem Prozentwert wird übersprungen.
       default: 50
       selector:
         number:
           min: 0
           max: 100
           step: 1
-          unit_of_measurement: '%'
+          unit_of_measurement: "%"
           mode: slider
 
     rain_amount_threshold:
       name: Niederschlagsmenge
-      description: Ab diesem mm-Wert wird die Bewässerung übersprungen.
+      description: Ab diesem mm-Wert wird übersprungen.
       default: 0.2
       selector:
         number:
           min: 0
-          max: 10
+          max: 20
           step: 0.1
           unit_of_measurement: mm
           mode: slider
 
-    notify_targets:
-      name: Benachrichtigung an
-      description: Optional mehrere Notify-Entitäten auswählen, z. B. das iPhone.
-      default: []
+    wind_speed_threshold:
+      name: Windgrenze
+      description: Ab diesem Wert wird wegen Wind übersprungen. Einheit muss zur Wetter-Entity passen.
+      default: 25
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: km/h
+          mode: slider
+
+    frost_temperature_threshold:
+      name: Frostgrenze
+      description: Unterhalb dieses Wertes wird übersprungen.
+      default: 2
+      selector:
+        number:
+          min: -10
+          max: 10
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    soil_moisture_sensor:
+      name: Bodenfeuchtesensor
+      description: Optional. Wenn gesetzt, wird bei zu hoher Bodenfeuchte übersprungen.
+      default: ""
       selector:
         entity:
-          domain: notify
+          domain: sensor
+
+    soil_moisture_threshold:
+      name: Bodenfeuchte-Grenze
+      description: Über diesem Prozentwert wird übersprungen. Erwartet Prozentwerte.
+      default: 35
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    manual_pause_helper:
+      name: Manuelle Sperre
+      description: Optional. Wenn dieser Helfer an ist, wird nicht bewässert.
+      default: ""
+      selector:
+        entity:
+          domain: input_boolean
+
+    notify_services:
+      name: Benachrichtigungsdienste
+      description: >
+        Notify-Dienste für iPhone oder weitere Geräte. Beispiel: notify.mobile_app_iphone_von_marcel
+      default:
+        - notify.mobile_app_iphone_von_marcel
+      selector:
+        text:
           multiple: true
+          type: text
 
-mode: single
+    lawn_name:
+      name: Name der Bewässerung
+      description: Wird in Benachrichtigungen angezeigt.
+      default: Rasen
+      selector:
+        text:
+          type: text
 
-variables:
-  watering_switch: !input watering_switch
-  use_fixed_time: !input use_fixed_time
-  watering_time: !input watering_time
-  use_sun_schedule: !input use_sun_schedule
-  sun_event: !input sun_event
-  sun_offset: !input sun_offset
-  watering_duration_minutes: !input watering_duration_minutes
-  lawn_name: !input lawn_name
-  use_weather_check: !input use_weather_check
-  weather_entity: !input weather_entity
-  forecast_lookahead_hours: !input forecast_lookahead_hours
-  rain_probability_threshold: !input rain_probability_threshold
-  rain_amount_threshold: !input rain_amount_threshold
-  notify_targets: !input notify_targets
-  has_notifications: "{{ notify_targets | default([]) | length > 0 }}"
+    debug_mode:
+      name: Debugmodus
+      description: Schickt in den Benachrichtigungen mehr Details.
+      default: false
+      selector:
+        boolean: {}
 
 triggers:
   - trigger: time
     at: !input watering_time
-    enabled: !input use_fixed_time
+    id: fixed_time
 
   - trigger: sun
-    event: !input sun_event
+    event: sunrise
     offset: !input sun_offset
-    enabled: !input use_sun_schedule
+    id: sunrise
+
+  - trigger: sun
+    event: sunset
+    offset: !input sun_offset
+    id: sunset
+
+variables:
+  watering_switch: !input watering_switch
+  watering_duration_minutes: !input watering_duration_minutes
+  start_mode: !input start_mode
+  weekdays: !input weekdays
+  weather_entity: !input weather_entity
+  use_weather_check: !input use_weather_check
+  forecast_lookahead_hours: !input forecast_lookahead_hours
+  rain_probability_threshold: !input rain_probability_threshold
+  rain_amount_threshold: !input rain_amount_threshold
+  wind_speed_threshold: !input wind_speed_threshold
+  frost_temperature_threshold: !input frost_temperature_threshold
+  soil_moisture_sensor: !input soil_moisture_sensor
+  soil_moisture_threshold: !input soil_moisture_threshold
+  manual_pause_helper: !input manual_pause_helper
+  notify_services: !input notify_services
+  lawn_name: !input lawn_name
+  debug_mode: !input debug_mode
 
 actions:
-  - if:
-      - condition: template
-        value_template: "{{ use_weather_check and weather_entity }}"
-    then:
-      - action: weather.get_forecasts
-        target:
-          entity_id: !input weather_entity
-        data:
-          type: hourly
-        response_variable: weather_forecast
-
-      - if:
+  - choose:
+      - conditions:
           - condition: template
-            value_template: >
-              {% set forecast_data = weather_forecast[weather_entity].forecast if weather_forecast is defined and weather_entity in weather_forecast else [] %}
-              {% set ns = namespace(skip=false, max_probability=0, max_amount=0, total_amount=0) %}
-              {% for item in forecast_data[:forecast_lookahead_hours | int] %}
-                {% set probability = item.precipitation_probability | default(0) | float(0) %}
-                {% set amount = item.precipitation | default(0) | float(0) %}
-                {% set ns.max_probability = [ns.max_probability, probability] | max %}
-                {% set ns.max_amount = [ns.max_amount, amount] | max %}
-                {% set ns.total_amount = ns.total_amount + amount %}
-                {% if probability >= (rain_probability_threshold | float(0)) or amount >= (rain_amount_threshold | float(0)) %}
-                  {% set ns.skip = true %}
+            value_template: >-
+              {{
+                (start_mode == 'fixed_time' and trigger.id == 'fixed_time') or
+                (start_mode == 'sunrise' and trigger.id == 'sunrise') or
+                (start_mode == 'sunset' and trigger.id == 'sunset')
+              }}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >-
+                      {{ use_weather_check and (weather_entity | string | length > 0) }}
+                sequence:
+                  - action: weather.get_forecasts
+                    target:
+                      entity_id: !input weather_entity
+                    data:
+                      type: hourly
+                    response_variable: weather_forecast
+
+          - variables:
+              forecast_data: >-
+                {% if use_weather_check and (weather_entity | string | length > 0) and weather_forecast is defined and weather_entity in weather_forecast %}
+                {{ weather_forecast[weather_entity].forecast }}
+                {% else %}
+                []
                 {% endif %}
-              {% endfor %}
-              {{ not ns.skip }}
-        then:
-          - if:
-              - condition: template
-                value_template: "{{ has_notifications }}"
-            then:
-              - action: notify.send_message
-                data:
-                  entity_id: !input notify_targets
-                  title: "{{ lawn_name }}"
-                  message: >
-                    {% set forecast_data = weather_forecast[weather_entity].forecast if weather_forecast is defined and weather_entity in weather_forecast else [] %}
-                    {% set ns = namespace(skip=false, max_probability=0, max_amount=0, total_amount=0) %}
-                    {% for item in forecast_data[:forecast_lookahead_hours | int] %}
-                      {% set probability = item.precipitation_probability | default(0) | float(0) %}
-                      {% set amount = item.precipitation | default(0) | float(0) %}
-                      {% set ns.max_probability = [ns.max_probability, probability] | max %}
-                      {% set ns.max_amount = [ns.max_amount, amount] | max %}
-                      {% set ns.total_amount = ns.total_amount + amount %}
-                      {% if probability >= (rain_probability_threshold | float(0)) or amount >= (rain_amount_threshold | float(0)) %}
-                        {% set ns.skip = true %}
-                      {% endif %}
-                    {% endfor %}
-                    🌧️ {{ lawn_name }}: geprüft für die nächsten {{ forecast_lookahead_hours }} h.
-                    Max. Regenwahrscheinlichkeit {{ ns.max_probability | round(0) }} %,
-                    max. Regenmenge {{ ns.max_amount | round(1) }} mm/h,
-                    Summe {{ ns.total_amount | round(1) }} mm.
-                    Bewässerung wird gestartet.
+              rain_probability_max: >-
+                {% set ns = namespace(v=0) %}
+                {% for item in forecast_data[:forecast_lookahead_hours | int(6)] %}
+                  {% set p = item.precipitation_probability | default(0) | float(0) %}
+                  {% if p > ns.v %}
+                    {% set ns.v = p %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.v | round(0) }}
+              rain_amount_max: >-
+                {% set ns = namespace(v=0) %}
+                {% for item in forecast_data[:forecast_lookahead_hours | int(6)] %}
+                  {% set p = item.precipitation | default(0) | float(0) %}
+                  {% if p > ns.v %}
+                    {% set ns.v = p %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.v | round(2) }}
+              wind_speed_max: >-
+                {% set ns = namespace(v=0) %}
+                {% for item in forecast_data[:forecast_lookahead_hours | int(6)] %}
+                  {% set p = item.wind_speed | default(0) | float(0) %}
+                  {% if p > ns.v %}
+                    {% set ns.v = p %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.v | round(1) }}
+              min_forecast_temperature: >-
+                {% set ns = namespace(v=999) %}
+                {% for item in forecast_data[:forecast_lookahead_hours | int(6)] %}
+                  {% set p = item.temperature | default(999) | float(999) %}
+                  {% if p < ns.v %}
+                    {% set ns.v = p %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.v | round(1) }}
+              soil_moisture_value: >-
+                {% if soil_moisture_sensor | string | length > 0 %}
+                  {{ states(soil_moisture_sensor) | float(0) }}
+                {% else %}
+                  {{ none }}
+                {% endif %}
+              weekday_ok: >-
+                {{ weekdays | length == 0 or ((now().strftime('%a') | lower) in weekdays) }}
+              manual_blocked: >-
+                {{ manual_pause_helper | string | length > 0 and is_state(manual_pause_helper, 'on') }}
+              rain_blocked: >-
+                {{
+                  use_weather_check and (
+                    (rain_probability_max | float(0)) >= (rain_probability_threshold | float(0))
+                    or
+                    (rain_amount_max | float(0)) >= (rain_amount_threshold | float(0))
+                  )
+                }}
+              wind_blocked: >-
+                {{ use_weather_check and ((wind_speed_max | float(0)) >= (wind_speed_threshold | float(0))) }}
+              frost_blocked: >-
+                {{ use_weather_check and ((min_forecast_temperature | float(999)) <= (frost_temperature_threshold | float(0))) }}
+              soil_blocked: >-
+                {{ soil_moisture_sensor | string | length > 0 and ((soil_moisture_value | float(0)) >= (soil_moisture_threshold | float(0))) }}
+              water_allowed: >-
+                {{ weekday_ok and not manual_blocked and not rain_blocked and not wind_blocked and not frost_blocked and not soil_blocked }}
+              skip_reason: >-
+                {% if not weekday_ok %}
+                  Wochentag gesperrt
+                {% elif manual_blocked %}
+                  Manuell gesperrt
+                {% elif rain_blocked %}
+                  Regen erwartet
+                {% elif wind_blocked %}
+                  Zu windig
+                {% elif frost_blocked %}
+                  Frostschutz aktiv
+                {% elif soil_blocked %}
+                  Boden zu feucht
+                {% else %}
+                  Freigabe
+                {% endif %}
+              rain_value_message: >-
+                Regencheck für {{ lawn_name }}:
+                max. {{ rain_probability_max | float(0) | round(0) }} %
+                / {{ rain_amount_max | float(0) | round(2) }} mm
+                in den nächsten {{ forecast_lookahead_hours | int(6) }} h.
+                Status: {{ 'Bewässerung startet' if water_allowed else 'Bewässerung übersprungen' }}.
+                Grund: {{ skip_reason | trim }}.
 
-          - if:
-              - condition: template
-                value_template: "{{ has_notifications }}"
-            then:
-              - action: notify.send_message
-                data:
-                  entity_id: !input notify_targets
-                  title: "{{ lawn_name }}"
-                  message: >
-                    {{ lawn_name }} startet jetzt für {{ watering_duration_minutes }} Minuten.
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_services | length > 0 }}"
+                sequence:
+                  - repeat:
+                      for_each: !input notify_services
+                      sequence:
+                        - action: "{{ repeat.item }}"
+                          metadata: {}
+                          data:
+                            title: Bewässerung
+                            message: >-
+                              {{ rain_value_message }}
+                              {% if debug_mode %}
+                              Debug: trigger={{ trigger.id }},
+                              weekday_ok={{ weekday_ok }},
+                              manual_blocked={{ manual_blocked }},
+                              rain_blocked={{ rain_blocked }},
+                              wind_blocked={{ wind_blocked }},
+                              frost_blocked={{ frost_blocked }},
+                              soil_blocked={{ soil_blocked }},
+                              weather_entity={{ weather_entity }},
+                              forecast_hours={{ forecast_lookahead_hours }}
+                              {% endif %}
 
-          - action: switch.turn_on
-            target:
-              entity_id: !input watering_switch
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ water_allowed }}"
+                sequence:
+                  - action: switch.turn_on
+                    target:
+                      entity_id: !input watering_switch
+                    data: {}
 
-          - delay:
-              minutes: !input watering_duration_minutes
+                  - delay:
+                      minutes: !input watering_duration_minutes
 
-          - action: switch.turn_off
-            target:
-              entity_id: !input watering_switch
+                  - action: switch.turn_off
+                    target:
+                      entity_id: !input watering_switch
+                    data: {}
 
-          - if:
-              - condition: template
-                value_template: "{{ has_notifications }}"
-            then:
-              - action: notify.send_message
-                data:
-                  entity_id: !input notify_targets
-                  title: "{{ lawn_name }}"
-                  message: >
-                    ✅ {{ lawn_name }} ist fertig. Bewässerung beendet.
-        else:
-          - if:
-              - condition: template
-                value_template: "{{ has_notifications }}"
-            then:
-              - action: notify.send_message
-                data:
-                  entity_id: !input notify_targets
-                  title: "{{ lawn_name }}"
-                  message: >
-                    {% set forecast_data = weather_forecast[weather_entity].forecast if weather_forecast is defined and weather_entity in weather_forecast else [] %}
-                    {% set ns = namespace(skip=false, max_probability=0, max_amount=0, total_amount=0) %}
-                    {% for item in forecast_data[:forecast_lookahead_hours | int] %}
-                      {% set probability = item.precipitation_probability | default(0) | float(0) %}
-                      {% set amount = item.precipitation | default(0) | float(0) %}
-                      {% set ns.max_probability = [ns.max_probability, probability] | max %}
-                      {% set ns.max_amount = [ns.max_amount, amount] | max %}
-                      {% set ns.total_amount = ns.total_amount + amount %}
-                      {% if probability >= (rain_probability_threshold | float(0)) or amount >= (rain_amount_threshold | float(0)) %}
-                        {% set ns.skip = true %}
-                      {% endif %}
-                    {% endfor %}
-                    🌧️ {{ lawn_name }}: geprüft für die nächsten {{ forecast_lookahead_hours }} h.
-                    Max. Regenwahrscheinlichkeit {{ ns.max_probability | round(0) }} %,
-                    max. Regenmenge {{ ns.max_amount | round(1) }} mm/h,
-                    Summe {{ ns.total_amount | round(1) }} mm.
-                    Bewässerung wird übersprungen.
-    else:
-      - if:
-          - condition: template
-            value_template: "{{ has_notifications }}"
-        then:
-          - action: notify.send_message
-            data:
-              entity_id: !input notify_targets
-              title: "{{ lawn_name }}"
-              message: >
-                {{ lawn_name }} startet ohne Wetterprüfung für {{ watering_duration_minutes }} Minuten.
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ notify_services | length > 0 }}"
+                        sequence:
+                          - repeat:
+                              for_each: !input notify_services
+                              sequence:
+                                - action: "{{ repeat.item }}"
+                                  metadata: {}
+                                  data:
+                                    title: Bewässerung beendet
+                                    message: >-
+                                      ✅ {{ lawn_name }} ist fertig.
+                                      Laufzeit: {{ watering_duration_minutes }} Minuten.
 
-      - action: switch.turn_on
-        target:
-          entity_id: !input watering_switch
-
-      - delay:
-          minutes: !input watering_duration_minutes
-
-      - action: switch.turn_off
-        target:
-          entity_id: !input watering_switch
-
-      - if:
-          - condition: template
-            value_template: "{{ has_notifications }}"
-        then:
-          - action: notify.send_message
-            data:
-              entity_id: !input notify_targets
-              title: "{{ lawn_name }}"
-              message: >
-                    ✅ {{ lawn_name }} ist fertig. Bewässerung beendet.
+            default:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ notify_services | length > 0 }}"
+                    sequence:
+                      - repeat:
+                          for_each: !input notify_services
+                          sequence:
+                            - action: "{{ repeat.item }}"
+                              metadata: {}
+                              data:
+                                title: Bewässerung übersprungen
+                                message: >-
+                                  ⛔ {{ lawn_name }} wurde nicht gestartet.
+                                  Grund: {{ skip_reason | trim }}.
+                                  Regen: {{ rain_amount_max | float(0) | round(2) }} mm,
+                                  Wahrscheinlichkeit: {{ rain_probability_max | float(0) | round(0) }} %.
+    default: []
