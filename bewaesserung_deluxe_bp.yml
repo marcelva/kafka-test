@@ -1,9 +1,9 @@
-
 blueprint:
   name: Rasenbewässerung mit Wettercheck, Sonnenoffset und iPhone-Notify
   description: >
     Startet eine Bewässerung zu fester Uhrzeit oder relativ zu Sonnenaufgang/-untergang,
-    prüft optional OpenWeatherMap-Stundenforecast, Bodenfeuchte, Wind und Frost,
+    prüft wahlweise OpenWeatherMap-Minutenforecast oder den Standard-Weather-Forecast,
+    berücksichtigt Bodenfeuchte, Wind und Frost,
     sendet immer eine Benachrichtigung mit dem berechneten Regenwert und meldet
     Start/Ende/Übersprung sauber zurück.
   domain: automation
@@ -82,10 +82,25 @@ blueprint:
 
     weather_entity:
       name: Wetter-Entität
-      description: Wetter-Entity für die Niederschlagsprüfung, zum Beispiel weather.openweathermap.
+      description: >
+        Wetter-Entity für die Niederschlagsprüfung, zum Beispiel weather.openweathermap.
       selector:
         entity:
           domain: weather
+
+    forecast_provider:
+      name: Forecast-Typ
+      description: >
+        OpenWeatherMap nutzt die Minute-Forecast-Aktion openweathermap.get_minute_forecast.
+        Andere Wetter-Integrationen nutzen weather.get_forecasts.
+      default: openweathermap_minute
+      selector:
+        select:
+          options:
+            - label: OpenWeatherMap Minutenforecast
+              value: openweathermap_minute
+            - label: Standard Weather Forecast
+              value: weather_hourly
 
     use_weather_check:
       name: Wetterprüfung aktivieren
@@ -96,7 +111,9 @@ blueprint:
 
     forecast_lookahead_hours:
       name: Forecast-Zeitraum
-      description: Wie viele Stunden in die Zukunft geprüft wird.
+      description: >
+        Wie viele Stunden in die Zukunft geprüft wird. Bei OpenWeatherMap-Minutenforecast
+        wird die nächste Stunde geprüft.
       default: 6
       selector:
         number:
@@ -108,7 +125,7 @@ blueprint:
 
     rain_probability_threshold:
       name: Niederschlagswahrscheinlichkeit
-      description: Ab diesem Prozentwert wird übersprungen.
+      description: Ab diesem Prozentwert wird übersprungen. Bei OpenWeatherMap-Minutenforecast nicht verfügbar.
       default: 50
       selector:
         number:
@@ -229,6 +246,7 @@ variables:
   start_mode: !input start_mode
   weekdays: !input weekdays
   weather_entity: !input weather_entity
+  forecast_provider: !input forecast_provider
   use_weather_check: !input use_weather_check
   forecast_lookahead_hours: !input forecast_lookahead_hours
   rain_probability_threshold: !input rain_probability_threshold
@@ -259,32 +277,57 @@ actions:
                     value_template: >-
                       {{ use_weather_check and (weather_entity | string | length > 0) }}
                 sequence:
-                  - action: weather.get_forecasts
-                    target:
-                      entity_id: !input weather_entity
-                    data:
-                      type: hourly
-                    response_variable: weather_forecast
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ forecast_provider == 'openweathermap_minute' }}"
+                        sequence:
+                          - action: openweathermap.get_minute_forecast
+                            target:
+                              entity_id: !input weather_entity
+                            response_variable: owm_forecast
+
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ forecast_provider == 'weather_hourly' }}"
+                        sequence:
+                          - action: weather.get_forecasts
+                            target:
+                              entity_id: !input weather_entity
+                            data:
+                              type: hourly
+                            response_variable: weather_forecast
 
           - variables:
               forecast_data: >-
-                {% if use_weather_check and (weather_entity | string | length > 0) and weather_forecast is defined and weather_entity in weather_forecast %}
+                {% if forecast_provider == 'openweathermap_minute' and owm_forecast is defined and weather_entity in owm_forecast %}
+                {{ owm_forecast[weather_entity].forecast }}
+                {% elif forecast_provider == 'weather_hourly' and weather_forecast is defined and weather_entity in weather_forecast %}
                 {{ weather_forecast[weather_entity].forecast }}
                 {% else %}
                 []
                 {% endif %}
               rain_probability_max: >-
-                {% set ns = namespace(v=0) %}
-                {% for item in forecast_data[:forecast_lookahead_hours | int(6)] %}
-                  {% set p = item.precipitation_probability | default(0) | float(0) %}
-                  {% if p > ns.v %}
-                    {% set ns.v = p %}
-                  {% endif %}
-                {% endfor %}
-                {{ ns.v | round(0) }}
+                {% if forecast_provider == 'weather_hourly' %}
+                  {% set ns = namespace(v=0) %}
+                  {% for item in forecast_data[:forecast_lookahead_hours | int(6)] %}
+                    {% set p = item.precipitation_probability | default(0) | float(0) %}
+                    {% if p > ns.v %}
+                      {% set ns.v = p %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ ns.v | round(0) }}
+                {% else %}
+                  0
+                {% endif %}
               rain_amount_max: >-
                 {% set ns = namespace(v=0) %}
-                {% for item in forecast_data[:forecast_lookahead_hours | int(6)] %}
+                {% if forecast_provider == 'openweathermap_minute' %}
+                  {% set forecast_slice = forecast_data[:60] %}
+                {% else %}
+                  {% set forecast_slice = forecast_data[:forecast_lookahead_hours | int(6)] %}
+                {% endif %}
+                {% for item in forecast_slice %}
                   {% set p = item.precipitation | default(0) | float(0) %}
                   {% if p > ns.v %}
                     {% set ns.v = p %}
@@ -322,9 +365,12 @@ actions:
               rain_blocked: >-
                 {{
                   use_weather_check and (
-                    (rain_probability_max | float(0)) >= (rain_probability_threshold | float(0))
-                    or
                     (rain_amount_max | float(0)) >= (rain_amount_threshold | float(0))
+                    or
+                    (
+                      forecast_provider == 'weather_hourly'
+                      and (rain_probability_max | float(0)) >= (rain_probability_threshold | float(0))
+                    )
                   )
                 }}
               wind_blocked: >-
@@ -353,9 +399,13 @@ actions:
                 {% endif %}
               rain_value_message: >-
                 Regencheck für {{ lawn_name }}:
+                {% if forecast_provider == 'openweathermap_minute' %}
+                max. {{ rain_amount_max | float(0) | round(2) }} mm/h in den nächsten 60 Minuten.
+                {% else %}
                 max. {{ rain_probability_max | float(0) | round(0) }} %
                 / {{ rain_amount_max | float(0) | round(2) }} mm
                 in den nächsten {{ forecast_lookahead_hours | int(6) }} h.
+                {% endif %}
                 Status: {{ 'Bewässerung startet' if water_allowed else 'Bewässerung übersprungen' }}.
                 Grund: {{ skip_reason | trim }}.
 
@@ -375,6 +425,7 @@ actions:
                               {{ rain_value_message }}
                               {% if debug_mode %}
                               Debug: trigger={{ trigger.id }},
+                              provider={{ forecast_provider }},
                               weekday_ok={{ weekday_ok }},
                               manual_blocked={{ manual_blocked }},
                               rain_blocked={{ rain_blocked }},
