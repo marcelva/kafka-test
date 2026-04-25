@@ -48,6 +48,37 @@ blueprint:
             - label: Sonnenuntergang
               value: sunset
 
+    weekdays:
+      name: Wochentage
+      description: An welchen Wochentagen die Bewässerung laufen darf.
+      default:
+        - "1"
+        - "2"
+        - "3"
+        - "4"
+        - "5"
+        - "6"
+        - "7"
+      selector:
+        select:
+          multiple: true
+          sort: true
+          options:
+            - label: Montag
+              value: "1"
+            - label: Dienstag
+              value: "2"
+            - label: Mittwoch
+              value: "3"
+            - label: Donnerstag
+              value: "4"
+            - label: Freitag
+              value: "5"
+            - label: Samstag
+              value: "6"
+            - label: Sonntag
+              value: "7"
+
     watering_time:
       name: Startzeit
       description: Uhrzeit für den Start, wenn der Startmodus auf feste Uhrzeit gesetzt ist.
@@ -100,6 +131,7 @@ variables:
   watering_duration_minutes: !input watering_duration_minutes
   lawn_name: !input lawn_name
   start_mode: !input start_mode
+  weekdays: !input weekdays
   watering_time: !input watering_time
   sun_offset: !input sun_offset
   use_weather_check: !input use_weather_check
@@ -136,53 +168,105 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ start_mode == 'fixed_time' and trigger.id == 'fixed_time' }}"
+            value_template: "{{ (now().isoweekday() | string) in weekdays }}"
         sequence:
-          - variables:
-              weather_available: >-
-                {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
-              current_weather_state: >-
-                {{ states(weather_entity) if weather_available else 'n/a' }}
-              current_rain_mm: >-
-                {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
-              current_temperature: >-
-                {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
-              current_humidity: >-
-                {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
-              current_clouds: >-
-                {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
-              skip_due_to_weather: >-
-                {{ weather_available and (
-                  current_weather_state in rain_states
-                  or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0))
-                ) }}
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ use_weather_check and weather_available }}"
+                    value_template: "{{ start_mode == 'fixed_time' and trigger.id == 'fixed_time' }}"
                 sequence:
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Wettercheck"
-                      message: >-
-                        Regencheck abgeschlossen. Zustand: {{ current_weather_state }}.
-                        Regen: {{ current_rain_mm | round(2) }} mm/h.
-                        Temperatur: {{ current_temperature if current_temperature is not none else 'n/a' }}°C.
-                        Luftfeuchte: {{ current_humidity if current_humidity is not none else 'n/a' }}%.
-                        Wolken: {{ current_clouds if current_clouds is not none else 'n/a' }}%.
-                        Entscheidung: {{ 'übersprungen' if skip_due_to_weather else 'Bewässerung startet' }}.
+                  - variables:
+                      weather_available: >-
+                        {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
+                      current_weather_state: >-
+                        {{ states(weather_entity) if weather_available else 'n/a' }}
+                      current_rain_mm: >-
+                        {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
+                      current_temperature: >-
+                        {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
+                      current_humidity: >-
+                        {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
+                      current_clouds: >-
+                        {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
+                      skip_due_to_weather: >-
+                        {{ weather_available and (
+                          current_weather_state in rain_states
+                          or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0))
+                        ) }}
                   - choose:
                       - conditions:
                           - condition: template
-                            value_template: "{{ skip_due_to_weather }}"
+                            value_template: "{{ use_weather_check and weather_available }}"
                         sequence:
                           - action: !input notify_service
                             data:
-                              title: "{{ lawn_name }} – Übersprungen"
+                              title: "{{ lawn_name }} – Wettercheck"
                               message: >-
-                                Bewässerung wurde nicht gestartet, da Regen erkannt wurde.
-                                Schwelle: {{ rain_amount_threshold | float(0) }} mm/h,
-                                gemessen: {{ current_rain_mm | round(2) }} mm/h.
+                                Regencheck abgeschlossen. Zustand: {{ current_weather_state }}.
+                                Regen: {{ current_rain_mm | round(2) }} mm/h.
+                                Temperatur: {{ current_temperature if current_temperature is not none else 'n/a' }}°C.
+                                Luftfeuchte: {{ current_humidity if current_humidity is not none else 'n/a' }}%.
+                                Wolken: {{ current_clouds if current_clouds is not none else 'n/a' }}%.
+                                Entscheidung: {{ 'übersprungen' if skip_due_to_weather else 'Bewässerung startet' }}.
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ skip_due_to_weather }}"
+                                sequence:
+                                  - action: !input notify_service
+                                    data:
+                                      title: "{{ lawn_name }} – Übersprungen"
+                                      message: >-
+                                        Bewässerung wurde nicht gestartet, da Regen erkannt wurde.
+                                        Schwelle: {{ rain_amount_threshold | float(0) }} mm/h,
+                                        gemessen: {{ current_rain_mm | round(2) }} mm/h.
+                            default:
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Start"
+                                  message: >-
+                                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                              - action: switch.turn_on
+                                target:
+                                  entity_id: !input watering_switch
+                              - delay:
+                                  minutes: !input watering_duration_minutes
+                              - action: switch.turn_off
+                                target:
+                                  entity_id: !input watering_switch
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Ende"
+                                  message: >-
+                                    Bewässerung beendet.
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and not weather_available }}"
+                        sequence:
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Wetter nicht verfügbar"
+                              message: >-
+                                Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
+                                Die Bewässerung wird trotzdem gestartet.
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Start"
+                              message: >-
+                                Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                          - action: switch.turn_on
+                            target:
+                              entity_id: !input watering_switch
+                          - delay:
+                              minutes: !input watering_duration_minutes
+                          - action: switch.turn_off
+                            target:
+                              entity_id: !input watering_switch
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Ende"
+                              message: >-
+                                Bewässerung beendet.
                     default:
                       - action: !input notify_service
                         data:
@@ -202,103 +286,103 @@ action:
                           title: "{{ lawn_name }} – Ende"
                           message: >-
                             Bewässerung beendet.
-              - conditions:
-                  - condition: template
-                    value_template: "{{ use_weather_check and not weather_available }}"
-                sequence:
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Wetter nicht verfügbar"
-                      message: >-
-                        Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
-                        Die Bewässerung wird trotzdem gestartet.
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Start"
-                      message: >-
-                        Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
-                  - action: switch.turn_on
-                    target:
-                      entity_id: !input watering_switch
-                  - delay:
-                      minutes: !input watering_duration_minutes
-                  - action: switch.turn_off
-                    target:
-                      entity_id: !input watering_switch
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Ende"
-                      message: >-
-                        Bewässerung beendet.
-            default:
-              - action: !input notify_service
-                data:
-                  title: "{{ lawn_name }} – Start"
-                  message: >-
-                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
-              - action: switch.turn_on
-                target:
-                  entity_id: !input watering_switch
-              - delay:
-                  minutes: !input watering_duration_minutes
-              - action: switch.turn_off
-                target:
-                  entity_id: !input watering_switch
-              - action: !input notify_service
-                data:
-                  title: "{{ lawn_name }} – Ende"
-                  message: >-
-                    Bewässerung beendet.
 
-      - conditions:
-          - condition: template
-            value_template: "{{ start_mode == 'sunrise' and trigger.id == 'sunrise' }}"
-        sequence:
-          - variables:
-              weather_available: >-
-                {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
-              current_weather_state: >-
-                {{ states(weather_entity) if weather_available else 'n/a' }}
-              current_rain_mm: >-
-                {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
-              current_temperature: >-
-                {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
-              current_humidity: >-
-                {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
-              current_clouds: >-
-                {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
-              skip_due_to_weather: >-
-                {{ weather_available and (
-                  current_weather_state in rain_states
-                  or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0))
-                ) }}
-          - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ use_weather_check and weather_available }}"
+                    value_template: "{{ start_mode == 'sunrise' and trigger.id == 'sunrise' }}"
                 sequence:
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Wettercheck"
-                      message: >-
-                        Regencheck abgeschlossen. Zustand: {{ current_weather_state }}.
-                        Regen: {{ current_rain_mm | round(2) }} mm/h.
-                        Temperatur: {{ current_temperature if current_temperature is not none else 'n/a' }}°C.
-                        Luftfeuchte: {{ current_humidity if current_humidity is not none else 'n/a' }}%.
-                        Wolken: {{ current_clouds if current_clouds is not none else 'n/a' }}%.
-                        Entscheidung: {{ 'übersprungen' if skip_due_to_weather else 'Bewässerung startet' }}.
+                  - variables:
+                      weather_available: >-
+                        {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
+                      current_weather_state: >-
+                        {{ states(weather_entity) if weather_available else 'n/a' }}
+                      current_rain_mm: >-
+                        {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
+                      current_temperature: >-
+                        {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
+                      current_humidity: >-
+                        {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
+                      current_clouds: >-
+                        {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
+                      skip_due_to_weather: >-
+                        {{ weather_available and (
+                          current_weather_state in rain_states
+                          or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0))
+                        ) }}
                   - choose:
                       - conditions:
                           - condition: template
-                            value_template: "{{ skip_due_to_weather }}"
+                            value_template: "{{ use_weather_check and weather_available }}"
                         sequence:
                           - action: !input notify_service
                             data:
-                              title: "{{ lawn_name }} – Übersprungen"
+                              title: "{{ lawn_name }} – Wettercheck"
                               message: >-
-                                Bewässerung wurde nicht gestartet, da Regen erkannt wurde.
-                                Schwelle: {{ rain_amount_threshold | float(0) }} mm/h,
-                                gemessen: {{ current_rain_mm | round(2) }} mm/h.
+                                Regencheck abgeschlossen. Zustand: {{ current_weather_state }}.
+                                Regen: {{ current_rain_mm | round(2) }} mm/h.
+                                Temperatur: {{ current_temperature if current_temperature is not none else 'n/a' }}°C.
+                                Luftfeuchte: {{ current_humidity if current_humidity is not none else 'n/a' }}%.
+                                Wolken: {{ current_clouds if current_clouds is not none else 'n/a' }}%.
+                                Entscheidung: {{ 'übersprungen' if skip_due_to_weather else 'Bewässerung startet' }}.
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ skip_due_to_weather }}"
+                                sequence:
+                                  - action: !input notify_service
+                                    data:
+                                      title: "{{ lawn_name }} – Übersprungen"
+                                      message: >-
+                                        Bewässerung wurde nicht gestartet, da Regen erkannt wurde.
+                                        Schwelle: {{ rain_amount_threshold | float(0) }} mm/h,
+                                        gemessen: {{ current_rain_mm | round(2) }} mm/h.
+                            default:
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Start"
+                                  message: >-
+                                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                              - action: switch.turn_on
+                                target:
+                                  entity_id: !input watering_switch
+                              - delay:
+                                  minutes: !input watering_duration_minutes
+                              - action: switch.turn_off
+                                target:
+                                  entity_id: !input watering_switch
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Ende"
+                                  message: >-
+                                    Bewässerung beendet.
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and not weather_available }}"
+                        sequence:
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Wetter nicht verfügbar"
+                              message: >-
+                                Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
+                                Die Bewässerung wird trotzdem gestartet.
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Start"
+                              message: >-
+                                Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                          - action: switch.turn_on
+                            target:
+                              entity_id: !input watering_switch
+                          - delay:
+                              minutes: !input watering_duration_minutes
+                          - action: switch.turn_off
+                            target:
+                              entity_id: !input watering_switch
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Ende"
+                              message: >-
+                                Bewässerung beendet.
                     default:
                       - action: !input notify_service
                         data:
@@ -318,103 +402,103 @@ action:
                           title: "{{ lawn_name }} – Ende"
                           message: >-
                             Bewässerung beendet.
-              - conditions:
-                  - condition: template
-                    value_template: "{{ use_weather_check and not weather_available }}"
-                sequence:
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Wetter nicht verfügbar"
-                      message: >-
-                        Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
-                        Die Bewässerung wird trotzdem gestartet.
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Start"
-                      message: >-
-                        Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
-                  - action: switch.turn_on
-                    target:
-                      entity_id: !input watering_switch
-                  - delay:
-                      minutes: !input watering_duration_minutes
-                  - action: switch.turn_off
-                    target:
-                      entity_id: !input watering_switch
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Ende"
-                      message: >-
-                        Bewässerung beendet.
-            default:
-              - action: !input notify_service
-                data:
-                  title: "{{ lawn_name }} – Start"
-                  message: >-
-                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
-              - action: switch.turn_on
-                target:
-                  entity_id: !input watering_switch
-              - delay:
-                  minutes: !input watering_duration_minutes
-              - action: switch.turn_off
-                target:
-                  entity_id: !input watering_switch
-              - action: !input notify_service
-                data:
-                  title: "{{ lawn_name }} – Ende"
-                  message: >-
-                    Bewässerung beendet.
 
-      - conditions:
-          - condition: template
-            value_template: "{{ start_mode == 'sunset' and trigger.id == 'sunset' }}"
-        sequence:
-          - variables:
-              weather_available: >-
-                {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
-              current_weather_state: >-
-                {{ states(weather_entity) if weather_available else 'n/a' }}
-              current_rain_mm: >-
-                {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
-              current_temperature: >-
-                {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
-              current_humidity: >-
-                {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
-              current_clouds: >-
-                {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
-              skip_due_to_weather: >-
-                {{ weather_available and (
-                  current_weather_state in rain_states
-                  or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0))
-                ) }}
-          - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ use_weather_check and weather_available }}"
+                    value_template: "{{ start_mode == 'sunset' and trigger.id == 'sunset' }}"
                 sequence:
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Wettercheck"
-                      message: >-
-                        Regencheck abgeschlossen. Zustand: {{ current_weather_state }}.
-                        Regen: {{ current_rain_mm | round(2) }} mm/h.
-                        Temperatur: {{ current_temperature if current_temperature is not none else 'n/a' }}°C.
-                        Luftfeuchte: {{ current_humidity if current_humidity is not none else 'n/a' }}%.
-                        Wolken: {{ current_clouds if current_clouds is not none else 'n/a' }}%.
-                        Entscheidung: {{ 'übersprungen' if skip_due_to_weather else 'Bewässerung startet' }}.
+                  - variables:
+                      weather_available: >-
+                        {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
+                      current_weather_state: >-
+                        {{ states(weather_entity) if weather_available else 'n/a' }}
+                      current_rain_mm: >-
+                        {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
+                      current_temperature: >-
+                        {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
+                      current_humidity: >-
+                        {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
+                      current_clouds: >-
+                        {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
+                      skip_due_to_weather: >-
+                        {{ weather_available and (
+                          current_weather_state in rain_states
+                          or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0))
+                        ) }}
                   - choose:
                       - conditions:
                           - condition: template
-                            value_template: "{{ skip_due_to_weather }}"
+                            value_template: "{{ use_weather_check and weather_available }}"
                         sequence:
                           - action: !input notify_service
                             data:
-                              title: "{{ lawn_name }} – Übersprungen"
+                              title: "{{ lawn_name }} – Wettercheck"
                               message: >-
-                                Bewässerung wurde nicht gestartet, da Regen erkannt wurde.
-                                Schwelle: {{ rain_amount_threshold | float(0) }} mm/h,
-                                gemessen: {{ current_rain_mm | round(2) }} mm/h.
+                                Regencheck abgeschlossen. Zustand: {{ current_weather_state }}.
+                                Regen: {{ current_rain_mm | round(2) }} mm/h.
+                                Temperatur: {{ current_temperature if current_temperature is not none else 'n/a' }}°C.
+                                Luftfeuchte: {{ current_humidity if current_humidity is not none else 'n/a' }}%.
+                                Wolken: {{ current_clouds if current_clouds is not none else 'n/a' }}%.
+                                Entscheidung: {{ 'übersprungen' if skip_due_to_weather else 'Bewässerung startet' }}.
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ skip_due_to_weather }}"
+                                sequence:
+                                  - action: !input notify_service
+                                    data:
+                                      title: "{{ lawn_name }} – Übersprungen"
+                                      message: >-
+                                        Bewässerung wurde nicht gestartet, da Regen erkannt wurde.
+                                        Schwelle: {{ rain_amount_threshold | float(0) }} mm/h,
+                                        gemessen: {{ current_rain_mm | round(2) }} mm/h.
+                            default:
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Start"
+                                  message: >-
+                                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                              - action: switch.turn_on
+                                target:
+                                  entity_id: !input watering_switch
+                              - delay:
+                                  minutes: !input watering_duration_minutes
+                              - action: switch.turn_off
+                                target:
+                                  entity_id: !input watering_switch
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Ende"
+                                  message: >-
+                                    Bewässerung beendet.
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and not weather_available }}"
+                        sequence:
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Wetter nicht verfügbar"
+                              message: >-
+                                Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
+                                Die Bewässerung wird trotzdem gestartet.
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Start"
+                              message: >-
+                                Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                          - action: switch.turn_on
+                            target:
+                              entity_id: !input watering_switch
+                          - delay:
+                              minutes: !input watering_duration_minutes
+                          - action: switch.turn_off
+                            target:
+                              entity_id: !input watering_switch
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Ende"
+                              message: >-
+                                Bewässerung beendet.
                     default:
                       - action: !input notify_service
                         data:
@@ -434,52 +518,5 @@ action:
                           title: "{{ lawn_name }} – Ende"
                           message: >-
                             Bewässerung beendet.
-              - conditions:
-                  - condition: template
-                    value_template: "{{ use_weather_check and not weather_available }}"
-                sequence:
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Wetter nicht verfügbar"
-                      message: >-
-                        Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
-                        Die Bewässerung wird trotzdem gestartet.
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Start"
-                      message: >-
-                        Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
-                  - action: switch.turn_on
-                    target:
-                      entity_id: !input watering_switch
-                  - delay:
-                      minutes: !input watering_duration_minutes
-                  - action: switch.turn_off
-                    target:
-                      entity_id: !input watering_switch
-                  - action: !input notify_service
-                    data:
-                      title: "{{ lawn_name }} – Ende"
-                      message: >-
-                        Bewässerung beendet.
-            default:
-              - action: !input notify_service
-                data:
-                  title: "{{ lawn_name }} – Start"
-                  message: >-
-                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
-              - action: switch.turn_on
-                target:
-                  entity_id: !input watering_switch
-              - delay:
-                  minutes: !input watering_duration_minutes
-              - action: switch.turn_off
-                target:
-                  entity_id: !input watering_switch
-              - action: !input notify_service
-                data:
-                  title: "{{ lawn_name }} – Ende"
-                  message: >-
-                    Bewässerung beendet.
-
+    default: []
 mode: single
