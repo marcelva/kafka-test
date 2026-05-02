@@ -1,7 +1,8 @@
 blueprint:
-  name: "Sommer Rollos (Multi) – Sonne + Temperatur + Override"
+  name: "Sommer Rollos (Multi) – sauber & stabil"
   description: >
-    Steuert mehrere Rollos basierend auf Sonnensensor und Temperaturen.
+    Mehrere Rollos mit Sonnensensor + Innen/Außen Temperatur.
+    Einfach, stabil und ohne Template-Fehler.
 
   domain: automation
 
@@ -99,15 +100,22 @@ condition:
     state: "on"
 
 action:
-  # 👉 HIER ist der Fix
   - variables:
       sun_entity: !input sun_sensor
-      temp_in_entity: !input temp_inside
-      temp_out_entity: !input temp_outside
+      tin_entity: !input temp_inside
+      tout_entity: !input temp_outside
+
+      temp_in_on: !input temp_in_on
+      temp_in_off: !input temp_in_off
+      temp_out_on: !input temp_out_on
+      temp_out_off: !input temp_out_off
+
+      shading_position: !input shading_position
+      open_position: !input open_position
 
       sun: "{{ is_state(sun_entity, 'on') }}"
-      tin: "{{ states(temp_in_entity) | float(0) }}"
-      tout: "{{ states(temp_out_entity) | float(0) }}"
+      tin: "{{ states(tin_entity) | float(0) }}"
+      tout: "{{ states(tout_entity) | float(0) }}"
 
   - choose:
 
@@ -115,22 +123,22 @@ action:
       - conditions:
           - condition: template
             value_template: >
-              {{ sun and tin > !input temp_in_on and tout > !input temp_out_on }}
+              {{ sun and tin > temp_in_on and tout > temp_out_on }}
         sequence:
           - service: cover.set_cover_position
             target: !input covers
             data:
-              position: !input shading_position
+              position: "{{ shading_position }}"
 
       # 🌥️ HOCH
       - conditions:
           - condition: template
             value_template: >
-              {{ not sun or tin < !input temp_in_off or tout < !input temp_out_off }}
+              {{ not sun or tin < temp_in_off or tout < temp_out_off }}
         sequence:
           - service: cover.set_cover_position
             target: !input covers
             data:
-              position: !input open_position
+              position: "{{ open_position }}"
 
 mode: restart
