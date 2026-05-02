@@ -1,15 +1,13 @@
 blueprint:
   name: "Sommer Rollos (Multi) – Sonne + Temperatur + Override"
   description: >
-    Steuert mehrere Rollos gleichzeitig basierend auf Sonnensensor,
-    Innen- und Außentemperatur. Stabil, einfach und ohne Flackern.
+    Steuert mehrere Rollos basierend auf Sonnensensor und Temperaturen.
 
   domain: automation
 
   input:
     covers:
       name: Rollos
-      description: Mehrere Rollos auswählbar
       selector:
         target:
           entity:
@@ -32,14 +30,12 @@ blueprint:
       selector:
         entity:
           domain: sensor
-          device_class: temperature
 
     temp_outside:
       name: Außentemperatur
       selector:
         entity:
           domain: sensor
-          device_class: temperature
 
     temp_in_on:
       default: 22
@@ -79,7 +75,6 @@ blueprint:
         number:
           min: 0
           max: 100
-          step: 1
 
     open_position:
       default: 100
@@ -87,7 +82,6 @@ blueprint:
         number:
           min: 0
           max: 100
-          step: 1
 
 trigger:
   - platform: state
@@ -105,10 +99,15 @@ condition:
     state: "on"
 
 action:
+  # 👉 HIER ist der Fix
   - variables:
-      sun: "{{ is_state(!input sun_sensor, 'on') }}"
-      tin: "{{ states(!input temp_inside) | float(0) }}"
-      tout: "{{ states(!input temp_outside) | float(0) }}"
+      sun_entity: !input sun_sensor
+      temp_in_entity: !input temp_inside
+      temp_out_entity: !input temp_outside
+
+      sun: "{{ is_state(sun_entity, 'on') }}"
+      tin: "{{ states(temp_in_entity) | float(0) }}"
+      tout: "{{ states(temp_out_entity) | float(0) }}"
 
   - choose:
 
