@@ -1,0 +1,137 @@
+blueprint:
+  name: "Sommer Rollos (Multi) – Sonne + Temperatur + Override"
+  description: >
+    Steuert mehrere Rollos gleichzeitig basierend auf Sonnensensor,
+    Innen- und Außentemperatur. Stabil, einfach und ohne Flackern.
+
+  domain: automation
+
+  input:
+    covers:
+      name: Rollos
+      description: Mehrere Rollos auswählbar
+      selector:
+        target:
+          entity:
+            domain: cover
+
+    enable:
+      name: Automatik EIN/AUS
+      selector:
+        entity:
+          domain: input_boolean
+
+    sun_sensor:
+      name: Sonnensensor
+      selector:
+        entity:
+          domain: binary_sensor
+
+    temp_inside:
+      name: Innentemperatur
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    temp_outside:
+      name: Außentemperatur
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    temp_in_on:
+      default: 22
+      selector:
+        number:
+          min: 10
+          max: 35
+          step: 0.5
+
+    temp_in_off:
+      default: 21
+      selector:
+        number:
+          min: 10
+          max: 35
+          step: 0.5
+
+    temp_out_on:
+      default: 18
+      selector:
+        number:
+          min: 0
+          max: 40
+          step: 0.5
+
+    temp_out_off:
+      default: 17
+      selector:
+        number:
+          min: 0
+          max: 40
+          step: 0.5
+
+    shading_position:
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+
+    open_position:
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+
+trigger:
+  - platform: state
+    entity_id: !input sun_sensor
+  - platform: state
+    entity_id: !input temp_inside
+  - platform: state
+    entity_id: !input temp_outside
+  - platform: state
+    entity_id: !input enable
+
+condition:
+  - condition: state
+    entity_id: !input enable
+    state: "on"
+
+action:
+  - variables:
+      sun: "{{ is_state(!input sun_sensor, 'on') }}"
+      tin: "{{ states(!input temp_inside) | float(0) }}"
+      tout: "{{ states(!input temp_outside) | float(0) }}"
+
+  - choose:
+
+      # 🌞 RUNTER
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ sun and tin > !input temp_in_on and tout > !input temp_out_on }}
+        sequence:
+          - service: cover.set_cover_position
+            target: !input covers
+            data:
+              position: !input shading_position
+
+      # 🌥️ HOCH
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ not sun or tin < !input temp_in_off or tout < !input temp_out_off }}
+        sequence:
+          - service: cover.set_cover_position
+            target: !input covers
+            data:
+              position: !input open_position
+
+mode: restart
