@@ -27,6 +27,13 @@ blueprint:
           filter:
             - domain: input_boolean
 
+    start_time:
+      name: "Frühester Startzeitpunkt"
+      description: "Vor dieser Uhrzeit fährt die Automatik nicht los"
+      default: "10:00:00"
+      selector:
+        time: {}
+
     debug_helper:
       name: "Debug-Helper"
       description: "input_text, in den der letzte Automatik-Entscheid geschrieben wird"
@@ -206,6 +213,8 @@ conditions:
   - condition: state
     entity_id: !input enable_helper
     state: "on"
+  - condition: time
+    after: !input start_time
 
 actions:
   - variables:
