@@ -1,144 +1,294 @@
 blueprint:
-  name: "Sommer Rollos (Multi) – sauber & stabil"
+  name: "Sommer-Rollo für mehrere Rollos"
   description: >
-    Mehrere Rollos mit Sonnensensor + Innen/Außen Temperatur.
-    Einfach, stabil und ohne Template-Fehler.
-
+    Steuert mehrere Rollos automatisch anhand eines vorhandenen Sonnensensors
+    sowie Innen- und Außentemperatur. Die Automatik fährt die Rollos bei
+    Sommerhitze in eine Beschattungsposition und öffnet sie wieder, wenn es
+    kühler wird oder die Sonne weg ist. Ein Freigabe-Schalter sperrt die
+    Automatik komplett. Ein Debug-Helper schreibt den letzten Entscheidungsstatus.
   domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
 
   input:
     covers:
-      name: Rollos
+      name: "Rollos"
+      description: "Mehrere Rollos auswählen. Bitte keine Gruppen verwenden."
       selector:
         target:
           entity:
             domain: cover
 
-    enable:
-      name: Automatik EIN/AUS
+    enable_helper:
+      name: "Freigabe-Schalter"
+      description: "input_boolean: AUS = Automatik gesperrt, EIN = Automatik aktiv"
       selector:
         entity:
-          domain: input_boolean
+          filter:
+            - domain: input_boolean
+
+    debug_helper:
+      name: "Debug-Helper"
+      description: "input_text, in den der letzte Automatik-Entscheid geschrieben wird"
+      selector:
+        entity:
+          filter:
+            - domain: input_text
 
     sun_sensor:
-      name: Sonnensensor
+      name: "Sonnensensor"
+      description: "Dein vorhandener binary_sensor, z. B. 'Sonne scheint stabil'"
       selector:
         entity:
-          domain: binary_sensor
+          filter:
+            - domain: binary_sensor
 
     temp_inside:
-      name: Innentemperatur
+      name: "Innentemperatur"
+      description: "Temperatursensor im Raum hinter den Rollos"
       selector:
         entity:
-          domain: sensor
+          filter:
+            - domain: sensor
+              device_class: temperature
 
     temp_outside:
-      name: Außentemperatur
+      name: "Außentemperatur"
+      description: "Außentemperatursensor"
       selector:
         entity:
-          domain: sensor
+          filter:
+            - domain: sensor
+              device_class: temperature
 
-    temp_in_on:
+    pv_sensor:
+      name: "PV-Leistung"
+      description: "Aktuelle PV-/Eingangsleistung in Watt (W)"
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: power
+
+    pv_close_threshold:
+      name: "PV-Schwelle zum Herunterfahren"
+      description: "Ab dieser Leistung ist die Sonnensituation klar genug zum Beschatten"
+      default: 700
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 50
+          mode: slider
+          unit_of_measurement: W
+
+    pv_open_threshold:
+      name: "PV-Schwelle zum Hochfahren"
+      description: "Unterhalb dieser Leistung wird wieder geöffnet"
+      default: 300
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 50
+          mode: slider
+          unit_of_measurement: W
+
+    indoor_close_temp:
+      name: "Innen: Mindesttemperatur für Beschattung"
       default: 22
       selector:
         number:
-          min: 10
-          max: 35
+          min: 0
+          max: 40
           step: 0.5
+          mode: slider
+          unit_of_measurement: "°C"
 
-    temp_in_off:
+    indoor_open_temp:
+      name: "Innen: Freigabe zum Öffnen"
       default: 21
       selector:
         number:
-          min: 10
-          max: 35
+          min: 0
+          max: 40
           step: 0.5
+          mode: slider
+          unit_of_measurement: "°C"
 
-    temp_out_on:
+    outdoor_close_temp:
+      name: "Außen: Mindesttemperatur für Beschattung"
       default: 18
       selector:
         number:
           min: 0
           max: 40
           step: 0.5
+          mode: slider
+          unit_of_measurement: "°C"
 
-    temp_out_off:
+    outdoor_open_temp:
+      name: "Außen: Freigabe zum Öffnen"
       default: 17
       selector:
         number:
           min: 0
           max: 40
           step: 0.5
+          mode: slider
+          unit_of_measurement: "°C"
 
-    shading_position:
+    shade_position:
+      name: "Beschattungsposition"
+      description: "Position für die Sommerbeschattung"
       default: 30
       selector:
         number:
           min: 0
           max: 100
+          step: 1
+          mode: slider
+          unit_of_measurement: "%"
 
     open_position:
+      name: "Offene Position"
+      description: "Position, auf die die Rollos beim Öffnen fahren"
       default: 100
       selector:
         number:
           min: 0
           max: 100
+          step: 1
+          mode: slider
+          unit_of_measurement: "%"
 
-trigger:
-  - platform: state
+    position_tolerance:
+      name: "Positions-Toleranz"
+      description: "Verhindert unnötige Wiederholungen bei fast gleicher Position"
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          mode: slider
+          unit_of_measurement: "%"
+
+triggers:
+  - trigger: homeassistant
+    event: start
+
+  - trigger: state
+    entity_id: !input enable_helper
+
+  - trigger: state
     entity_id: !input sun_sensor
-  - platform: state
-    entity_id: !input temp_inside
-  - platform: state
-    entity_id: !input temp_outside
-  - platform: state
-    entity_id: !input enable
 
-condition:
+  - trigger: state
+    entity_id: !input pv_sensor
+    not_from:
+      - unknown
+      - unavailable
+
+  - trigger: state
+    entity_id: !input temp_inside
+    not_from:
+      - unknown
+      - unavailable
+
+  - trigger: state
+    entity_id: !input temp_outside
+    not_from:
+      - unknown
+      - unavailable
+
+conditions:
   - condition: state
-    entity_id: !input enable
+    entity_id: !input enable_helper
     state: "on"
 
-action:
+actions:
   - variables:
+      covers_entity: !input covers
       sun_entity: !input sun_sensor
-      tin_entity: !input temp_inside
-      tout_entity: !input temp_outside
+      temp_in_entity: !input temp_inside
+      temp_out_entity: !input temp_outside
+      pv_entity: !input pv_sensor
+      debug_entity: !input debug_helper
 
-      temp_in_on: !input temp_in_on
-      temp_in_off: !input temp_in_off
-      temp_out_on: !input temp_out_on
-      temp_out_off: !input temp_out_off
-
-      shading_position: !input shading_position
+      pv_close_threshold: !input pv_close_threshold
+      pv_open_threshold: !input pv_open_threshold
+      indoor_close_temp: !input indoor_close_temp
+      indoor_open_temp: !input indoor_open_temp
+      outdoor_close_temp: !input outdoor_close_temp
+      outdoor_open_temp: !input outdoor_open_temp
+      shade_position: !input shade_position
       open_position: !input open_position
+      position_tolerance: !input position_tolerance
 
-      sun: "{{ is_state(sun_entity, 'on') }}"
-      tin: "{{ states(tin_entity) | float(0) }}"
-      tout: "{{ states(tout_entity) | float(0) }}"
+      sun_on: "{{ is_state(sun_entity, 'on') }}"
+      pv: "{{ states(pv_entity) | float(0) }}"
+      tin: "{{ states(temp_in_entity) | float(0) }}"
+      tout: "{{ states(temp_out_entity) | float(0) }}"
+
+      should_close: >-
+        {{ sun_on
+           and pv >= pv_close_threshold
+           and tin >= indoor_close_temp
+           and tout >= outdoor_close_temp }}
+
+      should_open: >-
+        {{ (not sun_on)
+           or pv <= pv_open_threshold
+           or tin <= indoor_open_temp
+           or tout <= outdoor_open_temp }}
+
+      debug_state: >-
+        {% if sun_on and pv >= pv_close_threshold and tin >= indoor_close_temp and tout >= outdoor_close_temp %}
+        CLOSE | sun={{ sun_on }}, pv={{ pv | round(0) }}, tin={{ tin | round(1) }}, tout={{ tout | round(1) }}
+        {% elif (not sun_on) or pv <= pv_open_threshold or tin <= indoor_open_temp or tout <= outdoor_open_temp %}
+        OPEN | sun={{ sun_on }}, pv={{ pv | round(0) }}, tin={{ tin | round(1) }}, tout={{ tout | round(1) }}
+        {% else %}
+        HOLD | sun={{ sun_on }}, pv={{ pv | round(0) }}, tin={{ tin | round(1) }}, tout={{ tout | round(1) }}
+        {% endif %}
 
   - choose:
-
-      # 🌞 RUNTER
-      - conditions:
+      - alias: "Rollos herunterfahren"
+        conditions:
           - condition: template
-            value_template: >
-              {{ sun and tin > temp_in_on and tout > temp_out_on }}
+            value_template: "{{ should_close }}"
         sequence:
           - service: cover.set_cover_position
             target: !input covers
             data:
-              position: "{{ shading_position }}"
+              position: "{{ shade_position | int }}"
+          - service: input_text.set_value
+            target:
+              entity_id: !input debug_helper
+            data:
+              value: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }} | {{ debug_state | trim }}"
 
-      # 🌥️ HOCH
-      - conditions:
+      - alias: "Rollos hochfahren"
+        conditions:
           - condition: template
-            value_template: >
-              {{ not sun or tin < temp_in_off or tout < temp_out_off }}
+            value_template: "{{ should_open }}"
         sequence:
           - service: cover.set_cover_position
             target: !input covers
             data:
-              position: "{{ open_position }}"
+              position: "{{ open_position | int }}"
+          - service: input_text.set_value
+            target:
+              entity_id: !input debug_helper
+            data:
+              value: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }} | {{ debug_state | trim }}"
+
+    default:
+      - service: input_text.set_value
+        target:
+          entity_id: !input debug_helper
+        data:
+          value: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }} | {{ debug_state | trim }}"
 
 mode: restart
+max_exceeded: silent
