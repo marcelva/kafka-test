@@ -5,134 +5,132 @@ blueprint:
     Sonnenuntergang, schaltet ein frei auswählbares Schaltgerät für eine definierbare Dauer ein und
     sendet eine iPhone-Benachrichtigung. Vor dem Start wird optional geprüft, ob es in den letzten
     23 Stunden geregnet hat oder in den nächsten 23 Stunden Regen erwartet wird.
+  domain: automation
+  input:
+    watering_switch:
+      name: Schaltgerät für Wasser
+      description: Schaltgerät, das die Bewässerung ein- und ausschaltet.
+      selector:
+        entity:
+          domain: switch
 
-domain: automation
-
-input:
-  watering_switch:
-    name: Schaltgerät für Wasser
-    description: Schaltgerät, das die Bewässerung ein- und ausschaltet.
-    selector:
-      entity:
-        domain: switch
-
-  watering_duration_minutes:
-    name: Laufzeit in Minuten
-    description: Wie lange das Wasser eingeschaltet bleibt.
-    default: 20
-    selector:
-      number:
-        min: 1
-        max: 180
-        step: 1
-        unit_of_measurement: min
-        mode: slider
-
-  lawn_name:
-    name: Name der Bewässerung
-    description: Wird in Benachrichtigungen angezeigt.
-    default: Rasen
-    selector:
-      text:
-
-  start_mode:
-    name: Startmodus
-    description: Feste Uhrzeit oder Sonnenereignis.
-    default: fixed_time
-    selector:
-      select:
-        options:
-          - label: Feste Uhrzeit
-            value: fixed_time
-          - label: Sonnenaufgang
-            value: sunrise
-          - label: Sonnenuntergang
-            value: sunset
-
-  weekdays:
-    name: Wochentage
-    description: An welchen Wochentagen die Bewässerung laufen darf.
-    default:
-      - "1"
-      - "2"
-      - "3"
-      - "4"
-      - "5"
-      - "6"
-      - "7"
-    selector:
-      select:
-        multiple: true
-        sort: true
-        options:
-          - label: Montag
-            value: "1"
-          - label: Dienstag
-            value: "2"
-          - label: Mittwoch
-            value: "3"
-          - label: Donnerstag
-            value: "4"
-          - label: Freitag
-            value: "5"
-          - label: Samstag
-            value: "6"
-          - label: Sonntag
-            value: "7"
-
-  watering_time:
-    name: Startzeit
-    description: Uhrzeit für den Start, wenn der Startmodus auf feste Uhrzeit gesetzt ist.
-    selector:
-      time:
-
-  sun_offset:
-    name: Sonnen-Offset
-    description: "Offset für Sonnenaufgang oder Sonnenuntergang. Beispiel: eine Stunde vorher."
-    default: "-01:00:00"
-    selector:
-      text:
-
-  use_weather_check:
-    name: Wettercheck aktivieren
-    description: Prüft die Wetter-Entity vor dem Start.
-    default: true
-    selector:
-      boolean:
-
-  weather_entity:
-    name: Wetter-Entity
-    description: Wetter-Entity, deren aktuelle Werte und Forecast geprüft werden.
-    default: weather.openweathermap
-    selector:
-      entity:
-        domain: weather
-
-  rain_amount_threshold:
-    name: Regen-Schwelle
-    description: Ab diesem Regenwert in mm/h wird nicht bewässert.
-    default: 0.2
-    selector:
-      number:
-        min: 0
-        max: 20
-        step: 0.1
-        unit_of_measurement: mm/h
-        mode: slider
-
-  rain_history_sensor:
-    name: Regen-Historie der letzten 23 Stunden
-    description: "Optionaler History-Stats-Sensor. Wenn > 0, gilt: Es hat in den letzten 23 Stunden geregnet."
-    default: ""
-    selector:
-      text:
-
-  notify_service:
-    name: Benachrichtigungsdienst
-    description: Trage hier den Notify-Dienst ein, zum Beispiel notify.mobile_app_iphone_von_marcel.
-    default: notify.mobile_app_iphone_von_marcel
-    selector:
-      text:
+    watering_duration_minutes:
+      name: Laufzeit in Minuten
+      description: Wie lange das Wasser eingeschaltet bleibt.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 180
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+  
+    lawn_name:
+      name: Name der Bewässerung
+      description: Wird in Benachrichtigungen angezeigt.
+      default: Rasen
+      selector:
+        text:
+  
+    start_mode:
+      name: Startmodus
+      description: Feste Uhrzeit oder Sonnenereignis.
+      default: fixed_time
+      selector:
+        select:
+          options:
+            - label: Feste Uhrzeit
+              value: fixed_time
+            - label: Sonnenaufgang
+              value: sunrise
+            - label: Sonnenuntergang
+              value: sunset
+  
+    weekdays:
+      name: Wochentage
+      description: An welchen Wochentagen die Bewässerung laufen darf.
+      default:
+        - "1"
+        - "2"
+        - "3"
+        - "4"
+        - "5"
+        - "6"
+        - "7"
+      selector:
+        select:
+          multiple: true
+          sort: true
+          options:
+            - label: Montag
+              value: "1"
+            - label: Dienstag
+              value: "2"
+            - label: Mittwoch
+              value: "3"
+            - label: Donnerstag
+              value: "4"
+            - label: Freitag
+              value: "5"
+            - label: Samstag
+              value: "6"
+            - label: Sonntag
+              value: "7"
+  
+    watering_time:
+      name: Startzeit
+      description: Uhrzeit für den Start, wenn der Startmodus auf feste Uhrzeit gesetzt ist.
+      selector:
+        time:
+  
+    sun_offset:
+      name: Sonnen-Offset
+      description: "Offset für Sonnenaufgang oder Sonnenuntergang. Beispiel: eine Stunde vorher."
+      default: "-01:00:00"
+      selector:
+        text:
+  
+    use_weather_check:
+      name: Wettercheck aktivieren
+      description: Prüft die Wetter-Entity vor dem Start.
+      default: true
+      selector:
+        boolean:
+  
+    weather_entity:
+      name: Wetter-Entity
+      description: Wetter-Entity, deren aktuelle Werte und Forecast geprüft werden.
+      default: weather.openweathermap
+      selector:
+        entity:
+          domain: weather
+  
+    rain_amount_threshold:
+      name: Regen-Schwelle
+      description: Ab diesem Regenwert in mm/h wird nicht bewässert.
+      default: 0.2
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 0.1
+          unit_of_measurement: mm/h
+          mode: slider
+  
+    rain_history_sensor:
+      name: Regen-Historie der letzten 23 Stunden
+      description: "Optionaler History-Stats-Sensor. Wenn > 0, gilt: Es hat in den letzten 23 Stunden geregnet."
+      default: ""
+      selector:
+        text:
+  
+    notify_service:
+      name: Benachrichtigungsdienst
+      description: Trage hier den Notify-Dienst ein, zum Beispiel notify.mobile_app_iphone_von_marcel.
+      default: notify.mobile_app_iphone_von_marcel
+      selector:
+        text:
 
 variables:
   watering_switch: !input watering_switch
