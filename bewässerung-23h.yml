@@ -1,0 +1,596 @@
+blueprint:
+  name: Rasenbewässerung 2026 – robust mit Sonnenoffset, Wetterfenster und iPhone-Notify
+  description: >
+    Startet eine Bewässerung zu einer frei wählbaren Uhrzeit oder relativ zu Sonnenaufgang bzw.
+    Sonnenuntergang, schaltet ein frei auswählbares Schaltgerät für eine definierbare Dauer ein und
+    sendet eine iPhone-Benachrichtigung. Vor dem Start wird optional geprüft, ob es in den letzten
+    23 Stunden geregnet hat oder in den nächsten 23 Stunden Regen erwartet wird.
+
+domain: automation
+
+input:
+  watering_switch:
+    name: Schaltgerät für Wasser
+    description: Schaltgerät, das die Bewässerung ein- und ausschaltet.
+    selector:
+      entity:
+        domain: switch
+
+  watering_duration_minutes:
+    name: Laufzeit in Minuten
+    description: Wie lange das Wasser eingeschaltet bleibt.
+    default: 20
+    selector:
+      number:
+        min: 1
+        max: 180
+        step: 1
+        unit_of_measurement: min
+        mode: slider
+
+  lawn_name:
+    name: Name der Bewässerung
+    description: Wird in Benachrichtigungen angezeigt.
+    default: Rasen
+    selector:
+      text:
+
+  start_mode:
+    name: Startmodus
+    description: Feste Uhrzeit oder Sonnenereignis.
+    default: fixed_time
+    selector:
+      select:
+        options:
+          - label: Feste Uhrzeit
+            value: fixed_time
+          - label: Sonnenaufgang
+            value: sunrise
+          - label: Sonnenuntergang
+            value: sunset
+
+  weekdays:
+    name: Wochentage
+    description: An welchen Wochentagen die Bewässerung laufen darf.
+    default:
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+      - "5"
+      - "6"
+      - "7"
+    selector:
+      select:
+        multiple: true
+        sort: true
+        options:
+          - label: Montag
+            value: "1"
+          - label: Dienstag
+            value: "2"
+          - label: Mittwoch
+            value: "3"
+          - label: Donnerstag
+            value: "4"
+          - label: Freitag
+            value: "5"
+          - label: Samstag
+            value: "6"
+          - label: Sonntag
+            value: "7"
+
+  watering_time:
+    name: Startzeit
+    description: Uhrzeit für den Start, wenn der Startmodus auf feste Uhrzeit gesetzt ist.
+    selector:
+      time:
+
+  sun_offset:
+    name: Sonnen-Offset
+    description: "Offset für Sonnenaufgang oder Sonnenuntergang. Beispiel: eine Stunde vorher."
+    default: "-01:00:00"
+    selector:
+      text:
+
+  use_weather_check:
+    name: Wettercheck aktivieren
+    description: Prüft die Wetter-Entity vor dem Start.
+    default: true
+    selector:
+      boolean:
+
+  weather_entity:
+    name: Wetter-Entity
+    description: Wetter-Entity, deren aktuelle Werte und Forecast geprüft werden.
+    default: weather.openweathermap
+    selector:
+      entity:
+        domain: weather
+
+  rain_amount_threshold:
+    name: Regen-Schwelle
+    description: Ab diesem Regenwert in mm/h wird nicht bewässert.
+    default: 0.2
+    selector:
+      number:
+        min: 0
+        max: 20
+        step: 0.1
+        unit_of_measurement: mm/h
+        mode: slider
+
+  rain_history_sensor:
+    name: Regen-Historie der letzten 23 Stunden
+    description: "Optionaler History-Stats-Sensor. Wenn > 0, gilt: Es hat in den letzten 23 Stunden geregnet."
+    default: ""
+    selector:
+      text:
+
+  notify_service:
+    name: Benachrichtigungsdienst
+    description: Trage hier den Notify-Dienst ein, zum Beispiel notify.mobile_app_iphone_von_marcel.
+    default: notify.mobile_app_iphone_von_marcel
+    selector:
+      text:
+
+variables:
+  watering_switch: !input watering_switch
+  watering_duration_minutes: !input watering_duration_minutes
+  lawn_name: !input lawn_name
+  start_mode: !input start_mode
+  weekdays: !input weekdays
+  watering_time: !input watering_time
+  sun_offset: !input sun_offset
+  use_weather_check: !input use_weather_check
+  weather_entity: !input weather_entity
+  rain_amount_threshold: !input rain_amount_threshold
+  rain_history_sensor: !input rain_history_sensor
+  notify_service: !input notify_service
+  rain_states:
+    - rainy
+    - pouring
+    - lightning-rainy
+    - lightning
+    - snowy-rainy
+    - snowy
+    - hail
+    - exceptional
+  bad_states:
+    - unavailable
+    - unknown
+
+trigger:
+  - platform: time
+    at: !input watering_time
+    id: fixed_time
+  - platform: sun
+    event: sunrise
+    offset: !input sun_offset
+    id: sunrise
+  - platform: sun
+    event: sunset
+    offset: !input sun_offset
+    id: sunset
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ (now().isoweekday() | string) in weekdays }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ start_mode == 'fixed_time' and trigger.id == 'fixed_time' }}"
+                sequence:
+                  - variables:
+                      weather_available: >-
+                        {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
+                      current_weather_state: >-
+                        {{ states(weather_entity) if weather_available else 'n/a' }}
+                      current_rain_mm: >-
+                        {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
+                      current_temperature: >-
+                        {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
+                      current_humidity: >-
+                        {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
+                      current_clouds: >-
+                        {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
+                      history_rain_hours: >-
+                        {{ states(rain_history_sensor) | float(0) if (use_weather_check and (rain_history_sensor | default('') | string | length > 0)) else 0 }}
+                      history_rain_detected: >-
+                        {{ use_weather_check and (rain_history_sensor | default('') | string | length > 0) and (states(rain_history_sensor) | float(0)) > 0 }}
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and weather_available }}"
+                        sequence:
+                          - action: weather.get_forecasts
+                            target:
+                              entity_id: !input weather_entity
+                            data:
+                              type: hourly
+                            response_variable: weather_forecast
+                          - variables:
+                              future_rain_detected: >-
+                                {% set horizon = as_timestamp(now() + timedelta(hours=23)) %}
+                                {% set ns = namespace(found=false) %}
+                                {% for fc in weather_forecast[weather_entity].forecast if as_timestamp(fc.datetime) <= horizon %}
+                                  {% if fc.condition in rain_states or (fc.precipitation | default(0) | float(0)) >= (rain_amount_threshold | float(0)) %}
+                                    {% set ns.found = true %}
+                                  {% endif %}
+                                {% endfor %}
+                                {{ ns.found }}
+                              current_rain_detected: >-
+                                {{ current_weather_state in rain_states or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0)) }}
+                              skip_due_to_weather: >-
+                                {{ history_rain_detected or current_rain_detected or future_rain_detected }}
+                              skip_reason: >-
+                                {% if history_rain_detected %}
+                                  Regen in den letzten 23 Stunden
+                                {% elif current_rain_detected %}
+                                  Aktuell Regen erkannt
+                                {% elif future_rain_detected %}
+                                  Regen in den nächsten 23 Stunden erwartet
+                                {% else %}
+                                  Kein Regenfenster erkannt
+                                {% endif %}
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ skip_due_to_weather }}"
+                                sequence:
+                                  - action: !input notify_service
+                                    data:
+                                      title: "{{ lawn_name }} – Übersprungen"
+                                      message: >-
+                                        Bewässerung wurde nicht gestartet.
+                                        Grund: {{ skip_reason }}.
+                                        Aktuell: {{ current_weather_state }}; Regen jetzt: {{ current_rain_mm | round(2) }} mm/h;
+                                        Historie (23h): {{ history_rain_hours | round(2) }} h;
+                                        Schwelle: {{ rain_amount_threshold | float(0) }} mm/h.
+                            default:
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Start"
+                                  message: >-
+                                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                              - action: switch.turn_on
+                                target:
+                                  entity_id: !input watering_switch
+                              - delay:
+                                  minutes: !input watering_duration_minutes
+                              - action: switch.turn_off
+                                target:
+                                  entity_id: !input watering_switch
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Ende"
+                                  message: >-
+                                    Bewässerung beendet.
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and not weather_available }}"
+                        sequence:
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Wetter nicht verfügbar"
+                              message: >-
+                                Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
+                                Die Bewässerung wird trotzdem gestartet.
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Start"
+                              message: >-
+                                Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                          - action: switch.turn_on
+                            target:
+                              entity_id: !input watering_switch
+                          - delay:
+                              minutes: !input watering_duration_minutes
+                          - action: switch.turn_off
+                            target:
+                              entity_id: !input watering_switch
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Ende"
+                              message: >-
+                                Bewässerung beendet.
+                    default:
+                      - action: !input notify_service
+                        data:
+                          title: "{{ lawn_name }} – Start"
+                          message: >-
+                            Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                      - action: switch.turn_on
+                        target:
+                          entity_id: !input watering_switch
+                      - delay:
+                          minutes: !input watering_duration_minutes
+                      - action: switch.turn_off
+                        target:
+                          entity_id: !input watering_switch
+                      - action: !input notify_service
+                        data:
+                          title: "{{ lawn_name }} – Ende"
+                          message: >-
+                            Bewässerung beendet.
+
+              - conditions:
+                  - condition: template
+                    value_template: "{{ start_mode == 'sunrise' and trigger.id == 'sunrise' }}"
+                sequence:
+                  - variables:
+                      weather_available: >-
+                        {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
+                      current_weather_state: >-
+                        {{ states(weather_entity) if weather_available else 'n/a' }}
+                      current_rain_mm: >-
+                        {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
+                      current_temperature: >-
+                        {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
+                      current_humidity: >-
+                        {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
+                      current_clouds: >-
+                        {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
+                      history_rain_hours: >-
+                        {{ states(rain_history_sensor) | float(0) if (use_weather_check and (rain_history_sensor | default('') | string | length > 0)) else 0 }}
+                      history_rain_detected: >-
+                        {{ use_weather_check and (rain_history_sensor | default('') | string | length > 0) and (states(rain_history_sensor) | float(0)) > 0 }}
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and weather_available }}"
+                        sequence:
+                          - action: weather.get_forecasts
+                            target:
+                              entity_id: !input weather_entity
+                            data:
+                              type: hourly
+                            response_variable: weather_forecast
+                          - variables:
+                              future_rain_detected: >-
+                                {% set horizon = as_timestamp(now() + timedelta(hours=23)) %}
+                                {% set ns = namespace(found=false) %}
+                                {% for fc in weather_forecast[weather_entity].forecast if as_timestamp(fc.datetime) <= horizon %}
+                                  {% if fc.condition in rain_states or (fc.precipitation | default(0) | float(0)) >= (rain_amount_threshold | float(0)) %}
+                                    {% set ns.found = true %}
+                                  {% endif %}
+                                {% endfor %}
+                                {{ ns.found }}
+                              current_rain_detected: >-
+                                {{ current_weather_state in rain_states or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0)) }}
+                              skip_due_to_weather: >-
+                                {{ history_rain_detected or current_rain_detected or future_rain_detected }}
+                              skip_reason: >-
+                                {% if history_rain_detected %}
+                                  Regen in den letzten 23 Stunden
+                                {% elif current_rain_detected %}
+                                  Aktuell Regen erkannt
+                                {% elif future_rain_detected %}
+                                  Regen in den nächsten 23 Stunden erwartet
+                                {% else %}
+                                  Kein Regenfenster erkannt
+                                {% endif %}
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ skip_due_to_weather }}"
+                                sequence:
+                                  - action: !input notify_service
+                                    data:
+                                      title: "{{ lawn_name }} – Übersprungen"
+                                      message: >-
+                                        Bewässerung wurde nicht gestartet.
+                                        Grund: {{ skip_reason }}.
+                                        Aktuell: {{ current_weather_state }}; Regen jetzt: {{ current_rain_mm | round(2) }} mm/h;
+                                        Historie (23h): {{ history_rain_hours | round(2) }} h;
+                                        Schwelle: {{ rain_amount_threshold | float(0) }} mm/h.
+                            default:
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Start"
+                                  message: >-
+                                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                              - action: switch.turn_on
+                                target:
+                                  entity_id: !input watering_switch
+                              - delay:
+                                  minutes: !input watering_duration_minutes
+                              - action: switch.turn_off
+                                target:
+                                  entity_id: !input watering_switch
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Ende"
+                                  message: >-
+                                    Bewässerung beendet.
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and not weather_available }}"
+                        sequence:
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Wetter nicht verfügbar"
+                              message: >-
+                                Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
+                                Die Bewässerung wird trotzdem gestartet.
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Start"
+                              message: >-
+                                Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                          - action: switch.turn_on
+                            target:
+                              entity_id: !input watering_switch
+                          - delay:
+                              minutes: !input watering_duration_minutes
+                          - action: switch.turn_off
+                            target:
+                              entity_id: !input watering_switch
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Ende"
+                              message: >-
+                                Bewässerung beendet.
+                    default:
+                      - action: !input notify_service
+                        data:
+                          title: "{{ lawn_name }} – Start"
+                          message: >-
+                            Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                      - action: switch.turn_on
+                        target:
+                          entity_id: !input watering_switch
+                      - delay:
+                          minutes: !input watering_duration_minutes
+                      - action: switch.turn_off
+                        target:
+                          entity_id: !input watering_switch
+                      - action: !input notify_service
+                        data:
+                          title: "{{ lawn_name }} – Ende"
+                          message: >-
+                            Bewässerung beendet.
+
+              - conditions:
+                  - condition: template
+                    value_template: "{{ start_mode == 'sunset' and trigger.id == 'sunset' }}"
+                sequence:
+                  - variables:
+                      weather_available: >-
+                        {{ use_weather_check and (weather_entity | default('') | string | length > 0) and states(weather_entity) not in bad_states }}
+                      current_weather_state: >-
+                        {{ states(weather_entity) if weather_available else 'n/a' }}
+                      current_rain_mm: >-
+                        {{ state_attr(weather_entity, 'rain') | default(0) | float(0) if weather_available else 0 }}
+                      current_temperature: >-
+                        {{ state_attr(weather_entity, 'temperature') | default(none) if weather_available else none }}
+                      current_humidity: >-
+                        {{ state_attr(weather_entity, 'humidity') | default(none) if weather_available else none }}
+                      current_clouds: >-
+                        {{ state_attr(weather_entity, 'cloud_coverage') | default(none) if weather_available else none }}
+                      history_rain_hours: >-
+                        {{ states(rain_history_sensor) | float(0) if (use_weather_check and (rain_history_sensor | default('') | string | length > 0)) else 0 }}
+                      history_rain_detected: >-
+                        {{ use_weather_check and (rain_history_sensor | default('') | string | length > 0) and (states(rain_history_sensor) | float(0)) > 0 }}
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and weather_available }}"
+                        sequence:
+                          - action: weather.get_forecasts
+                            target:
+                              entity_id: !input weather_entity
+                            data:
+                              type: hourly
+                            response_variable: weather_forecast
+                          - variables:
+                              future_rain_detected: >-
+                                {% set horizon = as_timestamp(now() + timedelta(hours=23)) %}
+                                {% set ns = namespace(found=false) %}
+                                {% for fc in weather_forecast[weather_entity].forecast if as_timestamp(fc.datetime) <= horizon %}
+                                  {% if fc.condition in rain_states or (fc.precipitation | default(0) | float(0)) >= (rain_amount_threshold | float(0)) %}
+                                    {% set ns.found = true %}
+                                  {% endif %}
+                                {% endfor %}
+                                {{ ns.found }}
+                              current_rain_detected: >-
+                                {{ current_weather_state in rain_states or (current_rain_mm | float(0)) >= (rain_amount_threshold | float(0)) }}
+                              skip_due_to_weather: >-
+                                {{ history_rain_detected or current_rain_detected or future_rain_detected }}
+                              skip_reason: >-
+                                {% if history_rain_detected %}
+                                  Regen in den letzten 23 Stunden
+                                {% elif current_rain_detected %}
+                                  Aktuell Regen erkannt
+                                {% elif future_rain_detected %}
+                                  Regen in den nächsten 23 Stunden erwartet
+                                {% else %}
+                                  Kein Regenfenster erkannt
+                                {% endif %}
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ skip_due_to_weather }}"
+                                sequence:
+                                  - action: !input notify_service
+                                    data:
+                                      title: "{{ lawn_name }} – Übersprungen"
+                                      message: >-
+                                        Bewässerung wurde nicht gestartet.
+                                        Grund: {{ skip_reason }}.
+                                        Aktuell: {{ current_weather_state }}; Regen jetzt: {{ current_rain_mm | round(2) }} mm/h;
+                                        Historie (23h): {{ history_rain_hours | round(2) }} h;
+                                        Schwelle: {{ rain_amount_threshold | float(0) }} mm/h.
+                            default:
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Start"
+                                  message: >-
+                                    Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                              - action: switch.turn_on
+                                target:
+                                  entity_id: !input watering_switch
+                              - delay:
+                                  minutes: !input watering_duration_minutes
+                              - action: switch.turn_off
+                                target:
+                                  entity_id: !input watering_switch
+                              - action: !input notify_service
+                                data:
+                                  title: "{{ lawn_name }} – Ende"
+                                  message: >-
+                                    Bewässerung beendet.
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ use_weather_check and not weather_available }}"
+                        sequence:
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Wetter nicht verfügbar"
+                              message: >-
+                                Wettercheck war aktiviert, aber die Wetter-Entity liefert aktuell keine verwertbaren Daten.
+                                Die Bewässerung wird trotzdem gestartet.
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Start"
+                              message: >-
+                                Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                          - action: switch.turn_on
+                            target:
+                              entity_id: !input watering_switch
+                          - delay:
+                              minutes: !input watering_duration_minutes
+                          - action: switch.turn_off
+                            target:
+                              entity_id: !input watering_switch
+                          - action: !input notify_service
+                            data:
+                              title: "{{ lawn_name }} – Ende"
+                              message: >-
+                                Bewässerung beendet.
+                    default:
+                      - action: !input notify_service
+                        data:
+                          title: "{{ lawn_name }} – Start"
+                          message: >-
+                            Bewässerung startet jetzt für {{ watering_duration_minutes }} Minuten.
+                      - action: switch.turn_on
+                        target:
+                          entity_id: !input watering_switch
+                      - delay:
+                          minutes: !input watering_duration_minutes
+                      - action: switch.turn_off
+                        target:
+                          entity_id: !input watering_switch
+                      - action: !input notify_service
+                        data:
+                          title: "{{ lawn_name }} – Ende"
+                          message: >-
+                            Bewässerung beendet.
+
+    default: []
+
+mode: single
