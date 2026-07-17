@@ -1,0 +1,73 @@
+blueprint:
+  name: "Türen & Fenster prüfen"
+  description: >
+    Prüft ausgewählte Tür-/Fensterkontakte zu einer festgelegten Zeit und
+    sendet bei offenen Kontakten eine dringliche Push-Nachricht ans Handy.
+  domain: automation
+  source_url: null
+  input:
+    contact_sensors:
+      name: Tür-/Fensterkontakte
+      description: Alle Kontakte, die geprüft werden sollen
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: binary_sensor
+              device_class: door
+            - domain: binary_sensor
+              device_class: window
+            - domain: binary_sensor
+              device_class: garage_door
+            - domain: binary_sensor
+              device_class: opening
+    notify_service:
+      name: Notify-Dienst
+      description: >
+        Name des Mobile-App-Notify-Dienstes OHNE "notify." davor,
+        z. B. "mobile_app_iphone_von_max"
+        (zu finden unter Entwicklerwerkzeuge > Dienste, Suche "notify.mobile_app")
+      selector:
+        text: {}
+    check_time:
+      name: Prüfzeit
+      description: Uhrzeit, zu der täglich geprüft wird
+      default: "22:00:00"
+      selector:
+        time: {}
+
+trigger:
+  - trigger: time
+    at: !input check_time
+
+variables:
+  contact_sensors: !input contact_sensors
+  notify_service: !input notify_service
+
+condition: []
+
+action:
+  - variables:
+      offene: >
+        {{ expand(contact_sensors) | selectattr('state', 'eq', 'on') | map(attribute='name') | list }}
+  - if:
+      - condition: template
+        value_template: "{{ offene | length > 0 }}"
+    then:
+      - action: "notify.{{ notify_service }}"
+        data:
+          title: "🚨 Tür oder Fenster offen!"
+          message: "Offen: {{ offene | join(', ') }}"
+          data:
+            priority: high
+            ttl: 0
+            channel: alarm_stream
+            importance: high
+            push:
+              sound:
+                name: default
+                critical: 1
+                volume: 1.0
+            interruption-level: critical
+
+mode: single
