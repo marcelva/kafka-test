@@ -4,7 +4,6 @@ blueprint:
     Prüft ausgewählte Tür-/Fensterkontakte zu einer festgelegten Zeit und
     sendet bei offenen Kontakten eine dringliche Push-Nachricht ans Handy.
   domain: automation
-  source_url: null
   input:
     contact_sensors:
       name: Tür-/Fensterkontakte
