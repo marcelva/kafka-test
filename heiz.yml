@@ -1,0 +1,237 @@
+blueprint:
+  name: Heizbericht am Abend
+  author: DEIN-NAME
+  domain: automation
+  source_url: https://github.com/DEIN-USER/DEIN-REPO/blob/main/heizbericht_abend.yaml
+  homeassistant:
+    min_version: "2025.12.0"
+  description: |
+    Schickt jeden Abend einen Bericht, **wo** und **wie oft** (optional auch **wie lange**) geheizt wurde.
+
+    **Voraussetzung:** Pro Raum ein *History-Stats*-Sensor vom Typ **Anzahl** (optional ein zweiter vom Typ **Zeit**), der einen Binärsensor mit `hvac_action == heating` auswertet. Den Zeitraum (z. B. „heute“) legst du im jeweiligen Sensor fest. Die Anleitung steht im README.
+
+    Räume, in denen nicht geheizt werden soll, kannst du markieren. Jede Heizphase dort erscheint im Bericht als 🚨.
+
+    **Variablen für eigene Aktionen:** `report_title`, `report_message`, `report_rows` (Liste), `report_alert` (true, wenn in einem als „sollte aus sein“ markierten Raum geheizt wurde).
+  input:
+    rooms:
+      name: Räume
+      description: Pro Raum einen Eintrag hinzufügen (Name, Sensor „Anzahl“, optional Sensor „Zeit“).
+      selector:
+        object:
+          multiple: true
+          label_field: name
+          description_field: count_sensor
+          fields:
+            name:
+              label: Raumname
+              required: true
+              selector:
+                text: {}
+            count_sensor:
+              label: Sensor „Anzahl“ (History Stats, Typ Anzahl)
+              required: true
+              selector:
+                entity:
+                  filter:
+                    - domain: sensor
+            time_sensor:
+              label: Sensor „Zeit“ (History Stats, Typ Zeit, optional)
+              selector:
+                entity:
+                  filter:
+                    - domain: sensor
+            expect_off:
+              label: Hier sollte nicht geheizt werden
+              selector:
+                boolean: {}
+    benachrichtigung:
+      name: Benachrichtigung
+      icon: mdi:bell-outline
+      description: Was mit dem Bericht passieren soll. Standard ist eine Meldung in der Home-Assistant-Oberfläche.
+      input:
+        notify_action:
+          name: Aktion zum Senden
+          description: >-
+            Z. B. „Benachrichtigung senden“ an dein Handy. Im Nachrichtenfeld
+            kannst du die Vorlagen report_title und report_message verwenden.
+          default:
+            - action: persistent_notification.create
+              data:
+                title: "{{ report_title }}"
+                message: "{{ report_message }}"
+                notification_id: heizbericht
+          selector:
+            action: {}
+    zeitplan:
+      name: Zeitplan
+      icon: mdi:clock-outline
+      input:
+        report_time:
+          name: Uhrzeit des Berichts
+          description: Am besten nach der letzten Heizphase des Tages.
+          default: "21:00:00"
+          selector:
+            time: {}
+        weekdays:
+          name: Wochentage
+          default: [mon, tue, wed, thu, fri, sat, sun]
+          selector:
+            select:
+              multiple: true
+              options:
+                - label: Montag
+                  value: mon
+                - label: Dienstag
+                  value: tue
+                - label: Mittwoch
+                  value: wed
+                - label: Donnerstag
+                  value: thu
+                - label: Freitag
+                  value: fri
+                - label: Samstag
+                  value: sat
+                - label: Sonntag
+                  value: sun
+    bericht:
+      name: Bericht anpassen
+      icon: mdi:text-box-outline
+      collapsed: true
+      input:
+        sort_rooms:
+          name: Nach Aktivität sortieren
+          description: Räume mit den meisten Heizphasen zuerst.
+          default: true
+          selector:
+            boolean: {}
+        list_idle_rooms:
+          name: Räume ohne Heizen auflisten
+          default: true
+          selector:
+            boolean: {}
+        send_if_idle:
+          name: Auch senden, wenn nirgends geheizt wurde
+          default: true
+          selector:
+            boolean: {}
+        warn_count:
+          name: Warnung ab Anzahl Heizphasen
+          description: Markiert Räume mit ⚠️. 0 = aus.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 100
+              mode: box
+        warn_minutes:
+          name: Warnung ab Heizdauer
+          description: Markiert Räume mit ⚠️. Braucht den Sensor „Zeit“. 0 = aus.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 1440
+              unit_of_measurement: min
+              mode: box
+
+mode: single
+max_exceeded: silent
+
+variables:
+  rooms: !input rooms
+  sort_rooms: !input sort_rooms
+  list_idle_rooms: !input list_idle_rooms
+  send_if_idle: !input send_if_idle
+  warn_count: !input warn_count
+  warn_minutes: !input warn_minutes
+
+  report_rows: |-
+    {%- set ns = namespace(rows=[]) -%}
+    {%- set items = rooms if rooms is not mapping else [rooms] -%}
+    {%- for entry in items -%}
+      {%- set cs = entry.get('count_sensor') or '' -%}
+      {%- set ts = entry.get('time_sensor') or '' -%}
+      {%- set label = (entry.get('name') or '') | trim -%}
+      {%- if label == '' and cs != '' -%}
+        {%- set label = state_attr(cs, 'friendly_name') or cs -%}
+      {%- endif -%}
+      {%- set valid = cs != '' and is_number(states(cs)) -%}
+      {%- set count = (states(cs) | int(0)) if valid else 0 -%}
+      {%- set minutes = ((states(ts) | float(0) * 60) | round(0) | int(0)) if (ts != '' and is_number(states(ts))) else 0 -%}
+      {%- set ns.rows = ns.rows + [ {
+        'name': label,
+        'valid': valid,
+        'count': count,
+        'minutes': minutes,
+        'heated': count > 0 or minutes > 0,
+        'expect_off': entry.get('expect_off', false) == true
+      } ] -%}
+    {%- endfor -%}
+    {{ ns.rows }}
+  report_rows_sorted: >-
+    {{ (report_rows | sort(attribute='minutes', reverse=true) | sort(attribute='count', reverse=true) | list) if sort_rooms else report_rows }}
+  report_valid_count: "{{ report_rows | selectattr('valid') | list | count }}"
+  report_heated_count: "{{ report_rows | selectattr('heated') | list | count }}"
+  report_total_count: |-
+    {%- set t = namespace(n=0) -%}
+    {%- for r in report_rows -%}
+      {%- set t.n = t.n + r['count'] -%}
+    {%- endfor -%}
+    {{ t.n }}
+  report_alert: "{{ report_rows | selectattr('heated') | selectattr('expect_off') | list | count > 0 }}"
+  report_should_send: "{{ send_if_idle or report_heated_count | int(0) > 0 }}"
+  report_title: >-
+    {%- set wd = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'] -%}
+    🔥 Heizbericht {{ wd[now().weekday()] }}, {{ now().strftime('%d.%m.%Y') }}
+  report_message: |-
+    {%- set ns = namespace(hot=[], idle=[], missing=[]) -%}
+    {%- if report_rows_sorted | count == 0 -%}
+      {%- set out = ['Keine Räume konfiguriert.'] -%}
+    {%- else -%}
+      {%- if report_heated_count | int(0) == 0 -%}
+        {%- set head = 'Es wurde in keinem Raum geheizt.' -%}
+      {%- else -%}
+        {%- set head = 'Räume mit Heizphasen: ' ~ report_heated_count ~ '/' ~ report_valid_count ~ ' · Heizphasen gesamt: ' ~ report_total_count -%}
+      {%- endif -%}
+      {%- for r in report_rows_sorted -%}
+        {%- if not r['valid'] -%}
+          {%- set ns.missing = ns.missing + [r['name']] -%}
+        {%- elif r['heated'] -%}
+          {%- set high = (warn_count | int(0) > 0 and r['count'] >= warn_count | int(0)) or (warn_minutes | int(0) > 0 and r['minutes'] >= warn_minutes | int(0)) -%}
+          {%- set icon = '🚨' if r['expect_off'] else ('⚠️' if high else '•') -%}
+          {%- set h = r['minutes'] // 60 -%}
+          {%- set m = r['minutes'] % 60 -%}
+          {%- set dur = (h ~ ' h ' ~ ('%02d' | format(m)) ~ ' min') if h > 0 else (m ~ ' min') -%}
+          {%- set line = icon ~ ' ' ~ r['name'] ~ ': ' ~ r['count'] ~ '×' ~ ((' · ' ~ dur) if r['minutes'] > 0 else '') ~ (' – sollte aus sein!' if r['expect_off'] else '') -%}
+          {%- set ns.hot = ns.hot + [line] -%}
+        {%- else -%}
+          {%- set ns.idle = ns.idle + [r['name']] -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- set out = [head] -%}
+      {%- if ns.hot | count > 0 -%}
+        {%- set out = out + [''] + ns.hot -%}
+      {%- endif -%}
+      {%- if list_idle_rooms and ns.idle | count > 0 -%}
+        {%- set out = out + ['', 'Nicht geheizt: ' ~ (ns.idle | join(', '))] -%}
+      {%- endif -%}
+      {%- if ns.missing | count > 0 -%}
+        {%- set out = out + ['Keine Daten: ' ~ (ns.missing | join(', '))] -%}
+      {%- endif -%}
+    {%- endif -%}
+    {{ out | join('\n') }}
+
+triggers:
+  - trigger: time
+    at: !input report_time
+
+conditions:
+  - condition: time
+    weekday: !input weekdays
+  - condition: template
+    value_template: "{{ report_should_send }}"
+
+actions:
+  - alias: Bericht senden
+    sequence: !input notify_action
